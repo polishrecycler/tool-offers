@@ -34,6 +34,15 @@ st.html("""
     outline: 2px solid #d92d20;
     outline-offset: 2px;
 }
+.st-key-pkd_footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--st-secondary-background-color, #f0f2f6);
+    border-top: 1px solid rgba(128, 128, 128, 0.2);
+    padding-top: 8px;
+    flex-shrink: 0;
+}
 </style>
 """)
 st.title("♻️ Nowe firmy: środowisko i odpady")
@@ -92,7 +101,9 @@ if report:
     else:
         st.success(status(report))
     st.metric("Potwierdzone firmy zgodne z wybranymi kodami", len(report.companies))
-    st.caption(f"PKD: {', '.join(report.filters)} · "
+    filter_summary = (", ".join(report.filters) if len(report.filters) <= 20
+                      else f"{len(report.filters)} wybranych kodów")
+    st.caption(f"PKD: {filter_summary} · "
                f"Działalność przeważająca i dodatkowa · "
                f"Wygenerowano: {report.generated_at}")
     records = rows(report)

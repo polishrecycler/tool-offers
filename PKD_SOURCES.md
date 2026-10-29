@@ -5,7 +5,15 @@
 Lista w formularzu obejmuje wszystkie **728 szczegółowych kodów (podklas)**
 Polskiej Klasyfikacji Działalności 2025, ze wszystkich branż, nie tylko odpadowej.
 Użytkownik wpisuje numer lub opis w wyszukiwarce rozwijanej listy i zaznacza
-wybrane pozycje. Zamknięte pole pokazuje tylko numery kodów. Czerwony kosz obok
+wybrane pozycje. Pierwszy checkbox „Zaznacz wszystkie” obejmuje cały katalog
+728 kodów, także pozycje ukryte przez wyszukiwanie. Jego odznaczenie usuwa
+całe robocze zaznaczenie. Przycisk „Zatwierdź” jest stale widoczny pod przewijaną
+listą, stosuje wybór i zamyka menu. Zamknięcie menu bez zatwierdzenia odrzuca
+robocze zmiany i zachowuje aktywny filtr.
+
+Zamknięte pole pokazuje tylko numery kodów. Przy bardzo dużym wyborze pokazuje
+pierwsze cztery numery oraz liczbę pozostałych, żeby nie rozciągać panelu przy
+zaznaczeniu całego katalogu. Czerwony kosz obok
 pola usuwa cały wybór, również pozycje ukryte przez wyszukiwanie.
 
 Pozostawiono wcześniejsze domyślne zaznaczenia: podklasy działów 38 i 39 oraz

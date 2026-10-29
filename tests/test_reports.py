@@ -276,6 +276,7 @@ def test_app_selected_subclasses_and_both_downloads(extract, monkeypatch):
     app.button(key="clear_pkd").click().run()
     app.checkbox(key="pkd_option_38.11.Z").check().run()
     app.checkbox(key="pkd_option_27.20.Z").check().run()
+    app.button(key="apply_pkd").click().run()
     app.sidebar.date_input[0].set_value(TARGET)
     app.checkbox(key="search_contacts").uncheck()
     app.button(key="fetch_companies").click().run()
@@ -313,6 +314,9 @@ def test_pkd_search_keeps_hidden_selections_and_clear_removes_them():
     app.text_input(key="pkd_search").set_value("AKUMULATORY").run()
     assert len([c for c in app.checkbox if c.key.startswith("pkd_option_")]) == 1
     app.checkbox(key="pkd_option_27.20.Z").check().run()
+    assert set(app.session_state["draft_pkd"]) == {*DEFAULT_SELECTED_PKD, "27.20.Z"}
+    assert set(app.session_state["selected_pkd"]) == set(DEFAULT_SELECTED_PKD)
+    app.button(key="apply_pkd").click().run()
     assert set(app.session_state["selected_pkd"]) == {*DEFAULT_SELECTED_PKD, "27.20.Z"}
     summary = app.get("popover")[0].proto.popover.label
     assert "27.20.Z" in summary
@@ -349,11 +353,15 @@ def test_changed_pkd_or_date_hides_previous_report(extract):
     app.run()
     assert len(app.dataframe) == 1
     app.checkbox(key="pkd_option_27.20.Z").check().run()
+    assert len(app.dataframe) == 1  # Editing the draft must not change the active report.
+    app.button(key="apply_pkd").click().run()
     assert not app.dataframe
     assert not app.get("download_button")
     assert "report" not in app.session_state
-    app.session_state["report"] = report
     app.checkbox(key="pkd_option_27.20.Z").uncheck().run()
+    app.button(key="apply_pkd").click().run()
+    app.session_state["report"] = report
+    app.run()
     assert len(app.dataframe) == 1
     app.sidebar.date_input[0].set_value(TARGET).run()
     assert not app.dataframe
@@ -405,6 +413,7 @@ def test_user_can_search_and_fetch_an_industry_outside_waste(extract, monkeypatc
     app.button(key="clear_pkd").click().run()
     app.text_input(key="pkd_search").set_value("62.10").run()
     app.checkbox(key="pkd_option_62.10.B").check().run()
+    app.button(key="apply_pkd").click().run()
     assert app.get("popover")[0].proto.popover.label == "62.10.B"
     app.sidebar.date_input[0].set_value(TARGET)
     app.checkbox(key="search_contacts").uncheck()
@@ -412,3 +421,32 @@ def test_user_can_search_and_fetch_an_industry_outside_waste(extract, monkeypatc
     assert not app.exception
     assert fetch.call_args.args == (TARGET, ("62.10.B",))
     assert len(app.dataframe) == 1
+
+
+def test_select_all_covers_hidden_codes_and_waits_for_confirmation():
+    from streamlit.testing.v1 import AppTest
+    from pkd_catalog import PKD_OPTIONS, DEFAULT_SELECTED_PKD
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    app.text_input(key="pkd_search").set_value("62.10").run()
+    checkboxes = [checkbox.key for checkbox in app.checkbox]
+    assert checkboxes[0] == "pkd_select_all"
+    app.checkbox(key="pkd_select_all").check().run()
+    assert set(app.session_state["draft_pkd"]) == set(PKD_OPTIONS)
+    assert set(app.session_state["selected_pkd"]) == set(DEFAULT_SELECTED_PKD)
+    app.text_input(key="pkd_search").set_value("99.00").run()
+    assert app.checkbox(key="pkd_option_99.00.Z").value
+    app.checkbox(key="pkd_option_99.00.Z").uncheck().run()
+    assert not app.checkbox(key="pkd_select_all").value
+    assert len(app.session_state["draft_pkd"]) == 727
+    app.checkbox(key="pkd_select_all").check().run()
+    app.button(key="apply_pkd").click().run()
+    assert set(app.session_state["selected_pkd"]) == set(PKD_OPTIONS)
+    assert not app.get("popover")[0].proto.popover.open
+    assert len(app.get("popover")[0].proto.popover.label) < 100
+    app.checkbox(key="pkd_select_all").uncheck().run()
+    assert app.session_state["draft_pkd"] == []
+    assert len(app.session_state["selected_pkd"]) == 728
+    app.button(key="apply_pkd").click().run()
+    assert app.session_state["selected_pkd"] == []
+    assert app.button(key="fetch_companies").disabled
+    assert not app.exception

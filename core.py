@@ -222,9 +222,10 @@ def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PK
         if not main_only:
             entries += business.get("przedmiotPozostalejDzialalnosci", [])
         matches = []
+        filter_codes = tuple(normalize_pkd(prefix) for prefix in prefixes)
         for entry in entries:
             code = entry_pkd_code(entry)
-            if any(normalize_pkd(code).startswith(normalize_pkd(p)) for p in prefixes):
+            if normalize_pkd(code).startswith(filter_codes):
                 matches.append(f"{code} — {entry.get('opis', '')}")
         if not matches:
             return None
