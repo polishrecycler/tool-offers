@@ -13,10 +13,17 @@ from zoneinfo import ZoneInfo
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from pkd_catalog import PKD_OPTIONS
 
 WARSAW = ZoneInfo("Europe/Warsaw")
 API = "https://api-krs.ms.gov.pl/api/krs"
 DEFAULT_PKD = ("37", "38", "39")
+ALL_PKD_FILTERS = frozenset(re.sub(r"[^0-9A-Z]", "", code) for code in PKD_OPTIONS)
+
+
+def count_qualification(counts, reason):
+    if counts is not None:
+        counts[reason] = counts.get(reason, 0) + 1
 
 
 class DataError(RuntimeError):
@@ -118,30 +125,33 @@ def extract_registry(header: dict, number: str) -> str:
     return registry
 
 
-def _check_full_extract(client, number: str, registry: str, target: date):
+def _check_full_extract(client, number: str, registry: str, target: date, qualification=None):
     """Use history only to exclude old/non-business entities, never as current PKD."""
     payload = json_get(client, f"{API}/OdpisPelny/{number}", {"rejestr": registry, "format": "json"})
     try:
         header = payload["odpis"]["naglowekP"]
         if extract_registry(header, number) != "P":
+            count_qualification(qualification, "outside_business_registry")
             return None
         first = [entry for entry in header["wpis"] if str(entry.get("numerWpisu")) == "1"]
         if len(first) != 1:
             raise DataError("Nie można jednoznacznie ustalić pierwszej rejestracji z odpisu pełnego.")
         if parse_date(first[0]["dataWpisu"]) != target:
+            count_qualification(qualification, "other_registration_date")
             return None
+        count_qualification(qualification, "new_registrations")
     except (KeyError, TypeError, AttributeError) as exc:
         raise DataError("Nie można ustalić pierwszej rejestracji z odpisu pełnego.") from exc
     raise DataError("Firma została zarejestrowana w wybranym dniu, ale nie ma aktualnego odpisu. "
                     "Nie można potwierdzić jej obecnych kodów działalności.")
 
 
-def current_extract(client, number: str, target: date):
+def current_extract(client, number: str, target: date, qualification=None):
     try:
         return json_get(client, f"{API}/OdpisAktualny/{number}", {"rejestr": "P", "format": "json"})
     except KrsResponseError as exc:
         if exc.status_code == 204:
-            return _check_full_extract(client, number, "P", target)
+            return _check_full_extract(client, number, "P", target, qualification)
         if exc.status_code != 404:
             raise
     # Daily bulletins include associations as well as entrepreneurs.
@@ -149,7 +159,7 @@ def current_extract(client, number: str, target: date):
         return json_get(client, f"{API}/OdpisAktualny/{number}", {"rejestr": "S", "format": "json"})
     except KrsResponseError as exc:
         if exc.status_code == 204:
-            return _check_full_extract(client, number, "S", target)
+            return _check_full_extract(client, number, "S", target, qualification)
         raise DataError("Nie odnaleziono aktualnego odpisu pozwalającego zweryfikować firmę. "
                         "Wynik pozostaje niepełny.") from exc
 
@@ -207,15 +217,18 @@ class Company:
 
 
 def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PKD,
-                         main_only: bool = False) -> Company | None:
+                         main_only: bool = False, qualification=None) -> Company | None:
     try:
         extract = payload["odpis"]
         header = extract["naglowekA"]
         if extract_registry(header, number) != "P":
+            count_qualification(qualification, "outside_business_registry")
             return None
         registered = parse_date(header["dataRejestracjiWKRS"])
         if registered != target:
+            count_qualification(qualification, "other_registration_date")
             return None  # Date of registration, NEVER date of the latest entry.
+        count_qualification(qualification, "new_registrations")
         data = extract["dane"]
         business = data["dzial3"]["przedmiotDzialalnosci"]
         entries = list(business.get("przedmiotPrzewazajacejDzialalnosci", []))
@@ -223,11 +236,15 @@ def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PK
             entries += business.get("przedmiotPozostalejDzialalnosci", [])
         matches = []
         filter_codes = tuple(normalize_pkd(prefix) for prefix in prefixes)
+        all_industries = ALL_PKD_FILTERS.issubset(filter_codes)
         for entry in entries:
             code = entry_pkd_code(entry)
-            if normalize_pkd(code).startswith(filter_codes):
+            if all_industries or normalize_pkd(code).startswith(filter_codes):
                 matches.append(f"{code} — {entry.get('opis', '')}")
         if not matches:
+            if all_industries:
+                raise DataError("Nowa firma nie ma kodów działalności pozwalających zweryfikować jej profil.")
+            count_qualification(qualification, "other_pkd")
             return None
         first = data["dzial1"]
         entity = first["danePodmiotu"]
@@ -256,6 +273,7 @@ class Report:
     errors: list[str] = field(default_factory=list)
     demo: bool = False
     contact_errors: list[str] = field(default_factory=list)
+    qualification: dict[str, int] = field(default_factory=dict)
 
     @property
     def complete(self):
@@ -277,8 +295,9 @@ def collect(target: date, prefixes=DEFAULT_PKD, main_only=False,
     report.candidates = len(numbers)
     for index, number in enumerate(sorted(numbers), 1):
         try:
-            payload = current_extract(client, number, target)
-            company = company_from_extract(payload, number, target, prefixes, main_only) if payload is not None else None
+            payload = current_extract(client, number, target, report.qualification)
+            company = company_from_extract(payload, number, target, prefixes, main_only,
+                                           report.qualification) if payload is not None else None
             report.checked += 1
             if company:
                 if enrich:

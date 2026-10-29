@@ -62,3 +62,28 @@ To nie jest potwierdzenie pobrania całego dziennego biuletynu ani gwarancja
 stałej dostępności zewnętrznego serwera. Program nadal musi pobrać dane
 nieznanych firm przed sprawdzeniem kodów; ta zmiana nie dodaje trwałej bazy
 ani nie usuwa konieczności skanowania biuletynu.
+
+## Weryfikacja pełnego biuletynu z 10 października 2026 r.
+
+Sprawdzono wszystkie 321 różnych numerów (514 pozycji przed usunięciem
+powtórzeń). Wynik: 319 przedsiębiorców z inną datą pierwszej rejestracji oraz
+2 podmioty rejestru stowarzyszeń. Nie znaleziono pierwszej rejestracji
+przedsiębiorcy z 10 października. Dla tego biuletynu wynik 0 pozostaje poprawny
+także przy wszystkich wybranych kodach. Najpóźniejsza potwierdzona data
+pierwszej rejestracji przedsiębiorcy w tej liście to 9 października.
+
+Raport zapisuje teraz liczniki kwalifikacji: inna data, inna część rejestru,
+nowe rejestracje przed filtrem działalności i brak dopasowania wybranych kodów.
+Interfejs rozróżnia brak nowych rejestracji od braku dopasowania branży.
+Liczniki trafiają również do eksportów.
+
+Osobno poprawiono przypadek nowej firmy z wyłącznie szerokim wpisem działu,
+grupy lub klasy. Przy wyborze wszystkich 728 kodów jest ona uwzględniana jako
+dowolna branża; przy konkretnym kodzie nadal wymagamy potwierdzenia tej
+podklasy. Brak jakichkolwiek kodów przy wyborze wszystkich branż oznacza
+niezweryfikowane dane, a nie kompletny pusty wynik.
+
+Sprawdzenie po zmianie: ponowne przetworzenie wszystkich 321 odpisów
+zapisanych podczas badania na żywo odtworzyło wynik 319 + 2 bez błędów.
+Kontrola dodatnia na rzeczywistym odpisie nowej firmy 0001275848 z 28 października
+zwróciła jedną zgodną firmę przy wszystkich wybranych kodach.

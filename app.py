@@ -101,6 +101,10 @@ if report:
     else:
         st.success(status(report))
     st.metric("Potwierdzone firmy zgodne z wybranymi kodami", len(report.companies))
+    qualification = getattr(report, "qualification", {})
+    new_registrations = qualification.get("new_registrations", len(report.companies))
+    st.caption(f"Pierwsze rejestracje przedsiębiorców w wybranym dniu, przed filtrem kodów: "
+               f"{new_registrations}.")
     filter_summary = (", ".join(report.filters) if len(report.filters) <= 20
                       else f"{len(report.filters)} wybranych kodów")
     st.caption(f"PKD: {filter_summary} · "
@@ -129,7 +133,14 @@ if report:
                     st.write({"Źródło": source["url"], "Dopasowanie": source["match"],
                               "Fragment": source["snippet"]})
     elif report.complete:
-        st.info("Nie znaleziono nowych firm z wybranymi kodami w tym dniu.")
+        if new_registrations == 0:
+            st.info(f"W biuletynie sprawdzono {report.candidates} numerów, ale nie potwierdzono "
+                    f"pierwszej rejestracji żadnego przedsiębiorcy w dniu {report.target_date}. "
+                    "Biuletyn obejmuje również zmiany istniejących podmiotów. "
+                    "Zaznaczenie wszystkich kodów nie wyłącza warunku daty pierwszej rejestracji.")
+        else:
+            st.info(f"Potwierdzono {new_registrations} pierwszych rejestracji przedsiębiorców w tym dniu, "
+                    "ale nie potwierdzono zgodności z wybranymi kodami działalności.")
     else:
         st.warning("Nie potwierdzono dotąd żadnej zgodnej firmy. Ponieważ część danych jest "
                    "niedostępna, nie można uznać tego za pełny wynik wyszukiwania.")
@@ -140,6 +151,9 @@ if report:
         st.write(f"Numery firm w dziennym biuletynie: {report.candidates}. "
                  f"Rozpatrzone: {report.checked}. "
                  f"Nieweryfikowane z powodu problemów pobierania: {report.candidates - report.checked}.")
+        st.write(f"Inna data pierwszej rejestracji: {qualification.get('other_registration_date', 0)}. "
+                 f"Podmioty z rejestru stowarzyszeń: {qualification.get('outside_business_registry', 0)}. "
+                 f"Nowe firmy bez zgodności z wybranymi kodami: {qualification.get('other_pkd', 0)}.")
         st.caption("Biuletyn obejmuje także zmiany istniejących firm i wpisy stowarzyszeń. "
                    "Do wyników trafiają wyłącznie potwierdzone nowe rejestracje ze zgodnymi kodami. "
                    "Brak odpisu nie jest traktowany jako brak dopasowania.")

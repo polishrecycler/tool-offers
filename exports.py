@@ -40,6 +40,10 @@ def metadata(report):
             ("Zakres PKD", "Tylko przeważające" if report.main_only else "Wszystkie ujawnione"),
             ("Numery z biuletynu", report.candidates), ("Rozpatrzone numery firm", report.checked),
             ("Firmy pasujące", len(report.companies)),
+            ("Pierwsze rejestracje przed filtrem kodów", report.qualification.get("new_registrations", len(report.companies))),
+            ("Inna data pierwszej rejestracji", report.qualification.get("other_registration_date", 0)),
+            ("Podmioty z rejestru stowarzyszeń", report.qualification.get("outside_business_registry", 0)),
+            ("Nowe firmy z innymi kodami", report.qualification.get("other_pkd", 0)),
             ("Problemy z wyszukiwaniem kontaktów", len(report.contact_errors)),
             ("Uwaga", "Data pierwszej rejestracji w KRS. PKD i kontakty KRS pochodzą z odpisu aktualnego. "
              "Pierwszy wpis nie oznacza daty zawarcia umowy spółki. Wyniki internetu wymagają potwierdzenia. "

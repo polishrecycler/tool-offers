@@ -450,3 +450,62 @@ def test_select_all_covers_hidden_codes_and_waits_for_confirmation():
     assert app.session_state["selected_pkd"] == []
     assert app.button(key="fetch_companies").disabled
     assert not app.exception
+
+
+def test_all_codes_include_new_company_with_only_broad_registered_codes(extract, monkeypatch):
+    from pkd_catalog import PKD_OPTIONS
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    business = extract["odpis"]["dane"]["dzial3"]["przedmiotDzialalnosci"]
+    business["przedmiotPrzewazajacejDzialalnosci"] = [{"kodDzial": "33", "opis": "Cały dział"}]
+    business["przedmiotPozostalejDzialalnosci"] = [{"kodDzial": "93", "kodKlasa": "1", "opis": "Cała grupa"}]
+    report = collect(TARGET, tuple(PKD_OPTIONS), client=Client([Response(["123456"]), Response(extract)]))
+    assert report.complete
+    assert len(report.companies) == 1
+    assert report.qualification == {"new_registrations": 1}
+    # A particular subclass still requires evidence of that exact code.
+    assert company_from_extract(extract, "0000123456", TARGET, ("33.14.Z",)) is None
+
+
+def test_all_codes_never_turn_updates_of_old_companies_into_new_registrations(extract, monkeypatch):
+    from copy import deepcopy
+    from pkd_catalog import PKD_OPTIONS
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    old = deepcopy(extract)
+    old["odpis"]["naglowekA"]["dataRejestracjiWKRS"] = "11.04.2001"
+    association = deepcopy(extract)
+    association["odpis"]["naglowekA"].update(numerKRS="0000123457", rejestr="RejS")
+    report = collect(TARGET, tuple(PKD_OPTIONS), client=Client([
+        Response(["123456", "123457"]), Response(old), Response(status_code=404), Response(association)]))
+    assert report.complete
+    assert not report.companies
+    assert report.qualification == {"other_registration_date": 1, "outside_business_registry": 1}
+
+
+def test_all_codes_missing_pkd_is_unverified_not_a_complete_empty_result(extract, monkeypatch):
+    from pkd_catalog import PKD_OPTIONS
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    business = extract["odpis"]["dane"]["dzial3"]["przedmiotDzialalnosci"]
+    business["przedmiotPrzewazajacejDzialalnosci"] = []
+    business["przedmiotPozostalejDzialalnosci"] = []
+    report = collect(TARGET, tuple(PKD_OPTIONS), client=Client([Response(["123456"]), Response(extract)]))
+    assert not report.complete
+    assert report.qualification["new_registrations"] == 1
+    assert report.checked == 0
+    assert report.errors
+
+
+def test_zero_new_registrations_is_explained_before_pkd_matching():
+    from streamlit.testing.v1 import AppTest
+    from pkd_catalog import PKD_OPTIONS
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    app.sidebar.date_input[0].set_value(date(2026, 10, 10)).run()
+    app.session_state["selected_pkd"] = list(PKD_OPTIONS)
+    app.session_state["report"] = Report(
+        "2026-10-10", "2026-10-29", list(PKD_OPTIONS), False,
+        candidates=321, checked=321,
+        qualification={"other_registration_date": 319, "outside_business_registry": 2})
+    app.run()
+    assert not app.exception
+    assert not app.dataframe
+    assert any("Zaznaczenie wszystkich kodów nie wyłącza" in info.value for info in app.info)
+    assert any("Inna data pierwszej rejestracji: 319" in text.value for text in app.markdown)

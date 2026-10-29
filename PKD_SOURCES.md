@@ -44,7 +44,10 @@ zweryfikowane nazwy 30 kodów. Nie dodano tekstu objaśnień do samych nazw.
 Program sprawdza działalność przeważającą i dodatkową. Każdy wynik wymaga
 potwierdzenia daty pierwszej rejestracji w wybranym dniu i zgodności kodu.
 Sam szeroki wpis działu, grupy lub klasy nie dowodzi zgodności z konkretną
-wybraną podklasą. Niektóre podklasy obejmują różne specjalizacje, dlatego kod
+wybraną podklasą. Wyjątkiem jest wybór całego katalogu: oznacza brak ograniczenia
+branży, więc obejmuje też firmy z działalnością zapisaną na szerszym poziomie.
+Nadal obowiązuje data pierwszej rejestracji i rejestr przedsiębiorców.
+Niektóre podklasy obejmują różne specjalizacje, dlatego kod
 nie zastępuje oceny rzeczywistej działalności firmy.
 
 Lista dotyczy wersji 2025, stosowanej do nowych rejestracji od 2025 r.
