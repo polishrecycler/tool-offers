@@ -5,10 +5,22 @@ import streamlit as st
 from contacts import enrich_contacts, search_url
 from core import DataError, collect, save_report, yesterday
 from exports import pdf_bytes, rows, status, xlsx_bytes
-from pkd_catalog import DEFAULT_SELECTED_PKD, PKD_OPTIONS, PKD_SOURCE_URL, pkd_label
+from pkd_picker import pkd_picker
 
 ROOT = Path(__file__).parent
 st.set_page_config(page_title="Tool Offers — nowe firmy KRS", page_icon="♻️", layout="wide")
+st.html("""
+<style>
+@media (min-width: 900px) {
+    section[data-testid="stSidebar"] { width: 480px !important; }
+}
+.st-key-pkd_picker button p {
+    text-align: left;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+}
+</style>
+""")
 st.title("♻️ Nowe firmy: środowisko i odpady")
 st.write("Znajdź firmy po raz pierwszy zarejestrowane w KRS w wybranym dniu. "
          "Sprawdź ich PKD, poszukaj kontaktów i pobierz listę.")
@@ -16,28 +28,15 @@ st.write("Znajdź firmy po raz pierwszy zarejestrowane w KRS w wybranym dniu. "
 with st.sidebar:
     st.header("Ustawienia raportu")
     target = st.date_input("Data pierwszej rejestracji w KRS", value=yesterday(), max_value=yesterday())
-    selected_pkd = st.multiselect(
-        "Branże — kody PKD", options=list(PKD_OPTIONS), default=list(DEFAULT_SELECTED_PKD),
-        format_func=pkd_label, key="selected_pkd", placeholder="Wyszukaj kod lub opis działalności",
-        help="PKD to Polska Klasyfikacja Działalności. Wybierz jeden lub więcej kodów. "
-             "Lista obejmuje odpady, odzysk, recykling, baterie i akumulatory oraz opakowania. "
-             "Wyszukiwanie obejmuje działalność przeważającą i dodatkową.")
-    st.caption("Nazwy kodów pochodzą z Polskiej Klasyfikacji Działalności 2025.")
-    with st.expander("Zakres kodów i źródło opisów"):
-        st.write("Nie ma osobnego kodu wyłącznie dla baterii do samochodów elektrycznych. "
-                 "Niektóre kody obejmują szerszą działalność, np. również inne akumulatory, "
-                 "części samochodowe, wyroby z papieru, szkła i tworzyw sztucznych. "
-                 "Sam kod nie potwierdza specjalizacji firmy.")
-        st.write("Odzysk opakowań obejmują kody gospodarki odpadami. "
-                 "Domyślnie zaznaczono gospodarkę odpadami i sprzedaż odpadów; "
-                 "pozostałe branże możesz dodać z listy.")
-        st.link_button("Urzędowy wykaz i objaśnienia kodów", PKD_SOURCE_URL)
+    selected_pkd = pkd_picker()
     if not selected_pkd:
         st.caption("Wybierz co najmniej jeden kod, aby pobrać firmy.")
     web = st.checkbox("Szukaj kontaktów w internecie", value=True,
+                      key="search_contacts",
                       help="Sprawdza publiczne wyniki wyszukiwania. Dane z fragmentów stron "
                            "wymagają potwierdzenia i nie zawsze są dostępne.")
-    run = st.button("Pobierz firmy z KRS", type="primary", width="stretch", disabled=not selected_pkd)
+    run = st.button("Pobierz firmy z KRS", type="primary", width="stretch", disabled=not selected_pkd,
+                    key="fetch_companies")
     st.caption("„Wczoraj” jest wyliczane według czasu w Polsce. "
                "Pobieranie odpisów dużej liczby firm może potrwać kilka minut.")
 

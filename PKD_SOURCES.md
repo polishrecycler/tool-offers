@@ -60,8 +60,10 @@ kodów nie zastępuje weryfikacji specjalizacji konkretnej firmy.
 ## Wyszukiwanie i wersje klasyfikacji
 
 Domyślnie zaznaczone są podklasy działów 38 i 39 oraz 46.87.Z. Inne kody
-można wyszukać po numerze lub urzędowej nazwie i dodać do wyboru. Program
-sprawdza zarówno działalność przeważającą, jak i dodatkową. Pusty wybór
+można wyszukać po numerze lub urzędowej nazwie i zaznaczyć na liście wewnątrz
+rozwijanego menu. Zamknięte pole pokazuje wyłącznie numery wybranych kodów.
+Przycisk obok pola usuwa cały wybór, również kody ukryte przez wyszukiwanie.
+Program sprawdza zarówno działalność przeważającą, jak i dodatkową. Pusty wybór
 blokuje pobieranie zamiast uruchamiać nieograniczone wyszukiwanie.
 
 Lista dotyczy PKD 2025, stosowanej do nowych rejestracji od 2025 r.

@@ -158,21 +158,21 @@ def test_app_selected_subclasses_and_both_downloads(extract, monkeypatch):
     monkeypatch.setattr("core.save_report", save)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
     assert not app.exception
-    assert len(app.sidebar.checkbox) == 1
-    assert app.sidebar.checkbox[0].label == "Szukaj kontaktów w internecie"
-    assert len(app.sidebar.button) == 1
-    assert not app.sidebar.text_input
-    labels = app.sidebar.multiselect[0].options
+    assert not app.sidebar.multiselect
+    assert not app.sidebar.expander
+    labels = [checkbox.label for checkbox in app.sidebar.checkbox]
     assert "27.20.Z — Produkcja baterii i akumulatorów" in labels
     assert "38.21.Z — Odzysk surowców" in labels
+    app.button(key="clear_pkd").click().run()
+    app.checkbox(key="pkd_option_38.11.Z").check().run()
+    app.checkbox(key="pkd_option_27.20.Z").check().run()
     app.sidebar.date_input[0].set_value(TARGET)
-    app.sidebar.multiselect[0].set_value(["38.11.Z", "27.20.Z"])
-    app.sidebar.checkbox[0].uncheck()
-    app.sidebar.button[0].click().run()
+    app.checkbox(key="search_contacts").uncheck()
+    app.button(key="fetch_companies").click().run()
     assert not app.exception
     assert not app.session_state["report"].demo
     fetch.assert_called_once()
-    assert fetch.call_args.args == (TARGET, ("38.11.Z", "27.20.Z"))
+    assert fetch.call_args.args == (TARGET, ("27.20.Z", "38.11.Z"))
     assert fetch.call_args.kwargs["main_only"] is False
     assert fetch.call_args.kwargs["enrich"] is None
     save.assert_called_once()
@@ -189,10 +189,31 @@ def test_app_empty_selection_does_not_fetch(monkeypatch):
     fetch = Mock()
     monkeypatch.setattr("core.collect", fetch)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
-    app.sidebar.multiselect[0].set_value([]).run()
+    app.button(key="clear_pkd").click().run()
     assert not app.exception
-    assert app.sidebar.button[0].disabled
+    assert app.button(key="fetch_companies").disabled
     fetch.assert_not_called()
+
+
+def test_pkd_search_keeps_hidden_selections_and_clear_removes_them():
+    from streamlit.testing.v1 import AppTest
+    from pkd_catalog import DEFAULT_SELECTED_PKD
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    app.text_input(key="pkd_search").set_value("AKUMULATORY").run()
+    assert len([c for c in app.checkbox if c.key.startswith("pkd_option_")]) == 1
+    app.checkbox(key="pkd_option_27.20.Z").check().run()
+    assert set(app.session_state["selected_pkd"]) == {*DEFAULT_SELECTED_PKD, "27.20.Z"}
+    summary = app.get("popover")[0].proto.popover.label
+    assert "27.20.Z" in summary
+    assert "akumulator" not in summary.lower()
+    app.text_input(key="pkd_search").set_value("nieistniejąca fraza").run()
+    assert set(app.session_state["selected_pkd"]) == {*DEFAULT_SELECTED_PKD, "27.20.Z"}
+    app.button(key="clear_pkd").click().run()
+    assert app.session_state["selected_pkd"] == []
+    app.text_input(key="pkd_search").set_value("").run()
+    assert not any(c.value for c in app.checkbox if c.key.startswith("pkd_option_"))
+    assert app.get("popover")[0].proto.popover.label == "Wybierz kody PKD"
+    assert not app.exception
 
 
 def test_demo_query_parameter_does_not_generate_fictional_results():
