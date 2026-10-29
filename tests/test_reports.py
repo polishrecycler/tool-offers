@@ -119,7 +119,9 @@ def test_association_is_checked_in_its_own_register(extract, monkeypatch):
     client = Client([Response(["123456"]), Response(status_code=404), Response(extract)])
     report = collect(TARGET, client=client)
     assert report.complete
-    assert report.companies == []
+    assert len(report.companies) == 1
+    assert report.companies[0].registry == "S"
+    assert "rejestr=S" in report.companies[0].krs_source
     assert client.calls[1][1]["params"]["rejestr"] == "P"
     assert client.calls[2][1]["params"]["rejestr"] == "S"
 
@@ -473,25 +475,26 @@ def test_all_codes_never_turn_updates_of_old_companies_into_new_registrations(ex
     old = deepcopy(extract)
     old["odpis"]["naglowekA"]["dataRejestracjiWKRS"] = "11.04.2001"
     association = deepcopy(extract)
-    association["odpis"]["naglowekA"].update(numerKRS="0000123457", rejestr="RejS")
+    association["odpis"]["naglowekA"].update(numerKRS="0000123457", rejestr="RejS", dataRejestracjiWKRS="11.04.2001")
     report = collect(TARGET, tuple(PKD_OPTIONS), client=Client([
         Response(["123456", "123457"]), Response(old), Response(status_code=404), Response(association)]))
     assert report.complete
     assert not report.companies
-    assert report.qualification == {"other_registration_date": 1, "outside_business_registry": 1}
+    assert report.qualification == {"other_registration_date": 2}
 
 
-def test_all_codes_missing_pkd_is_unverified_not_a_complete_empty_result(extract, monkeypatch):
+def test_all_industries_includes_new_entities_without_declared_pkd(extract, monkeypatch):
     from pkd_catalog import PKD_OPTIONS
     monkeypatch.setattr("core.time.sleep", lambda _: None)
     business = extract["odpis"]["dane"]["dzial3"]["przedmiotDzialalnosci"]
     business["przedmiotPrzewazajacejDzialalnosci"] = []
     business["przedmiotPozostalejDzialalnosci"] = []
     report = collect(TARGET, tuple(PKD_OPTIONS), client=Client([Response(["123456"]), Response(extract)]))
-    assert not report.complete
+    assert report.complete
     assert report.qualification["new_registrations"] == 1
-    assert report.checked == 0
-    assert report.errors
+    assert len(report.companies) == 1
+    assert report.companies[0].pkd == []
+    assert not report.errors
 
 
 def test_zero_new_registrations_is_explained_before_pkd_matching():
@@ -509,3 +512,55 @@ def test_zero_new_registrations_is_explained_before_pkd_matching():
     assert not app.dataframe
     assert any("Zaznaczenie wszystkich kodów nie wyłącza" in info.value for info in app.info)
     assert any("Inna data pierwszej rejestracji: 319" in text.value for text in app.markdown)
+
+
+def test_new_association_without_business_codes_is_included_for_all_industries(extract, monkeypatch):
+    from pkd_catalog import PKD_OPTIONS
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    extract["odpis"]["naglowekA"]["rejestr"] = "RejS"
+    del extract["odpis"]["dane"]["dzial3"]
+    report = collect(TARGET, tuple(PKD_OPTIONS), client=Client([
+        Response(["123456"]), Response(status_code=404), Response(extract)]))
+    assert report.complete
+    assert len(report.companies) == 1
+    assert report.companies[0].registry == "S"
+    assert report.qualification == {"new_registrations": 1, "new_associations": 1}
+    assert company_from_extract(extract, "0000123456", TARGET, ("38.11.Z",)) is None
+
+
+def test_old_parser_report_is_never_reused():
+    from streamlit.testing.v1 import AppTest
+    from pkd_catalog import DEFAULT_SELECTED_PKD
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py")
+    report = Report(yesterday().isoformat(), "2026-10-29", list(DEFAULT_SELECTED_PKD), False)
+    report.parser_version = "legacy"
+    app.session_state["report"] = report
+    app.run()
+    assert not app.exception
+    assert "report" not in app.session_state
+
+
+def test_foreign_branch_uses_its_actual_entity_and_address_fields(extract):
+    from pkd_catalog import PKD_OPTIONS
+    first = extract["odpis"]["dane"]["dzial1"]
+    first["danePodmiotuZagranicznego"] = first.pop("danePodmiotu")
+    first["siedzibaIAdresPodmiotuZagranicznego"] = first.pop("siedzibaIAdres")
+    company = company_from_extract(extract, "0000123456", TARGET, tuple(PKD_OPTIONS))
+    assert company and company.name == "TEST ODPADY SP. Z O.O."
+    assert "Łódź" in company.address
+
+
+def test_application_reloads_a_stale_imported_parser():
+    import subprocess, sys
+    code = '''
+import core
+from streamlit.testing.v1 import AppTest
+core.PARSER_VERSION = "old-version"
+core.company_from_extract = lambda *a, **k: None
+app = AppTest.from_file("app.py").run()
+assert not app.exception
+assert core.PARSER_VERSION == "2026-10-29.4"
+assert core.company_from_extract.__name__ == "company_from_extract"
+'''
+    subprocess.run([sys.executable, "-c", code], check=True,
+                   cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)

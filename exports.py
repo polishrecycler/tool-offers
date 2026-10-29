@@ -18,12 +18,13 @@ from core import Report
 def rows(report: Report) -> list[dict]:
     return [{"Nazwa": c.name, "KRS": c.krs, "NIP": c.nip, "REGON": c.regon,
              "Rejestracja w KRS": c.registration_date, "Adres": c.address,
-             "PKD": "\n".join(c.pkd), "E-mail z KRS": "; ".join(c.emails),
+             "PKD": "\n".join(c.pkd) or "Nie ujawniono kodów działalności", "E-mail z KRS": "; ".join(c.emails),
              "WWW z KRS": "; ".join(c.websites),
              "E-mail z internetu (do potwierdzenia)": "; ".join(c.email_candidates),
              "Telefon z internetu (do potwierdzenia)": "; ".join(c.phone_candidates),
              "Status kontaktu": c.contact_status, "Źródło KRS": c.krs_source,
-             "Źródła internetowe": "\n".join(s["url"] for s in c.sources)} for c in report.companies]
+             "Źródła internetowe": "\n".join(s["url"] for s in c.sources),
+             "Rejestr": "Przedsiębiorców" if c.registry == "P" else "Stowarzyszeń"} for c in report.companies]
 
 
 def status(report):
@@ -42,7 +43,7 @@ def metadata(report):
             ("Firmy pasujące", len(report.companies)),
             ("Pierwsze rejestracje przed filtrem kodów", report.qualification.get("new_registrations", len(report.companies))),
             ("Inna data pierwszej rejestracji", report.qualification.get("other_registration_date", 0)),
-            ("Podmioty z rejestru stowarzyszeń", report.qualification.get("outside_business_registry", 0)),
+            ("Nowe wpisy stowarzyszeń", report.qualification.get("new_associations", 0)),
             ("Nowe firmy z innymi kodami", report.qualification.get("other_pkd", 0)),
             ("Problemy z wyszukiwaniem kontaktów", len(report.contact_errors)),
             ("Uwaga", "Data pierwszej rejestracji w KRS. PKD i kontakty KRS pochodzą z odpisu aktualnego. "
@@ -108,14 +109,15 @@ def pdf_bytes(report: Report) -> bytes:
     title = ParagraphStyle("title", parent=style, fontSize=16, leading=21)
     def p(value):
         return Paragraph(escape(str(value)).replace("\n", "<br/>"), style)
-    story = [Paragraph("Nowe firmy: środowisko i odpady", title), p(status(report)), Spacer(1, 12)]
+    story = [Paragraph("Nowi przedsiębiorcy i stowarzyszenia", title), p(status(report)), Spacer(1, 12)]
     for key, value in metadata(report):
         story.append(p(f"{key}: {value}"))
     story.append(Spacer(1, 14))
     if not report.companies:
         story.append(p("Brak firm w raporcie. Sprawdź status i ewentualne błędy."))
     for company in report.companies:
-        story += [p(company.name), p(f"KRS: {company.krs} | NIP: {company.nip} | REGON: {company.regon}"),
+        story += [p(company.name), p("Rejestr: " + ("przedsiębiorców" if company.registry == "P" else "stowarzyszeń")),
+                  p(f"KRS: {company.krs} | NIP: {company.nip} | REGON: {company.regon}"),
                   p(f"Rejestracja: {company.registration_date} | {company.address}"),
                   p("PKD: " + "; ".join(company.pkd)),
                   p("E-mail z KRS: " + "; ".join(company.emails)),

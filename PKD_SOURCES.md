@@ -46,7 +46,7 @@ potwierdzenia daty pierwszej rejestracji w wybranym dniu i zgodności kodu.
 Sam szeroki wpis działu, grupy lub klasy nie dowodzi zgodności z konkretną
 wybraną podklasą. Wyjątkiem jest wybór całego katalogu: oznacza brak ograniczenia
 branży, więc obejmuje też firmy z działalnością zapisaną na szerszym poziomie.
-Nadal obowiązuje data pierwszej rejestracji i rejestr przedsiębiorców.
+Nadal obowiązuje data pierwszego wpisu do właściwego rejestru; uwzględniamy przedsiębiorców oraz stowarzyszenia. Przy wszystkich branżach uwzględniamy również podmioty bez ujawnionych kodów.
 Niektóre podklasy obejmują różne specjalizacje, dlatego kod
 nie zastępuje oceny rzeczywistej działalności firmy.
 

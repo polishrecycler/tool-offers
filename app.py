@@ -1,10 +1,16 @@
 from pathlib import Path
 from collections import Counter
+import importlib
 
 import streamlit as st
+import core
+
+# A source update must not retain an older imported parser in a running host.
+if getattr(core, "PARSER_VERSION", None) != "2026-10-29.4":
+    importlib.reload(core)
 
 from contacts import enrich_contacts, search_url
-from core import DataError, collect, normalize_pkd, save_report, yesterday
+from core import DataError, PARSER_VERSION, collect, normalize_pkd, save_report, yesterday
 from exports import pdf_bytes, rows, status, xlsx_bytes
 from pkd_picker import pkd_picker
 
@@ -45,13 +51,14 @@ st.html("""
 }
 </style>
 """)
-st.title("♻️ Nowe firmy: środowisko i odpady")
-st.write("Znajdź firmy po raz pierwszy zarejestrowane w KRS w wybranym dniu. "
+st.title("Nowi przedsiębiorcy i stowarzyszenia")
+st.write("Znajdź podmioty po raz pierwszy wpisane do rejestru przedsiębiorców lub stowarzyszeń w wybranym dniu. "
          "Sprawdź ich PKD, poszukaj kontaktów i pobierz listę.")
 
 with st.sidebar:
     st.header("Ustawienia raportu")
-    target = st.date_input("Data pierwszej rejestracji w KRS", value=yesterday(), max_value=yesterday())
+    target = st.date_input("Data wpisu do rejestru przedsiębiorców lub stowarzyszeń",
+                           value=yesterday(), max_value=yesterday())
     selected_pkd = pkd_picker()
     if not selected_pkd:
         st.caption("Wybierz co najmniej jeden kod, aby pobrać firmy.")
@@ -63,6 +70,7 @@ with st.sidebar:
                     key="fetch_companies")
     st.caption("„Wczoraj” jest wyliczane według czasu w Polsce. "
                "Pobieranie odpisów dużej liczby firm może potrwać kilka minut.")
+    st.caption(f"Wersja aplikacji: {PARSER_VERSION}")
 
 st.info("Lista dotyczy pierwszej rejestracji w KRS. Późniejsze zmiany wpisów są odrzucane. "
         "Kody PKD i kontakty w KRS są odczytywane z odpisu aktualnego.")
@@ -89,7 +97,8 @@ if run and selected_pkd:
 
 report = st.session_state.get("report")
 # Never present a previous query's rows as matches for the current controls.
-if report and (report.demo or report.main_only or report.target_date != target.isoformat()
+if report and (getattr(report, "parser_version", None) != PARSER_VERSION
+               or report.demo or report.main_only or report.target_date != target.isoformat()
                or {normalize_pkd(code) for code in report.filters}
                != {normalize_pkd(code) for code in selected_pkd}):
     st.session_state.pop("report", None)
@@ -100,10 +109,10 @@ if report:
         st.warning(status(report))
     else:
         st.success(status(report))
-    st.metric("Potwierdzone firmy zgodne z wybranymi kodami", len(report.companies))
+    st.metric("Potwierdzone nowe podmioty dla wybranego zakresu", len(report.companies))
     qualification = getattr(report, "qualification", {})
     new_registrations = qualification.get("new_registrations", len(report.companies))
-    st.caption(f"Pierwsze rejestracje przedsiębiorców w wybranym dniu, przed filtrem kodów: "
+    st.caption(f"Nowe wpisy przedsiębiorców i stowarzyszeń w wybranym dniu, przed filtrem kodów: "
                f"{new_registrations}.")
     filter_summary = (", ".join(report.filters) if len(report.filters) <= 20
                       else f"{len(report.filters)} wybranych kodów")
@@ -135,11 +144,11 @@ if report:
     elif report.complete:
         if new_registrations == 0:
             st.info(f"W biuletynie sprawdzono {report.candidates} numerów, ale nie potwierdzono "
-                    f"pierwszej rejestracji żadnego przedsiębiorcy w dniu {report.target_date}. "
+                    f"pierwszej rejestracji przedsiębiorcy ani stowarzyszenia w dniu {report.target_date}. "
                     "Biuletyn obejmuje również zmiany istniejących podmiotów. "
                     "Zaznaczenie wszystkich kodów nie wyłącza warunku daty pierwszej rejestracji.")
         else:
-            st.info(f"Potwierdzono {new_registrations} pierwszych rejestracji przedsiębiorców w tym dniu, "
+            st.info(f"Potwierdzono {new_registrations} pierwszych rejestracji w tym dniu, "
                     "ale nie potwierdzono zgodności z wybranymi kodami działalności.")
     else:
         st.warning("Nie potwierdzono dotąd żadnej zgodnej firmy. Ponieważ część danych jest "
@@ -152,11 +161,13 @@ if report:
                  f"Rozpatrzone: {report.checked}. "
                  f"Nieweryfikowane z powodu problemów pobierania: {report.candidates - report.checked}.")
         st.write(f"Inna data pierwszej rejestracji: {qualification.get('other_registration_date', 0)}. "
-                 f"Podmioty z rejestru stowarzyszeń: {qualification.get('outside_business_registry', 0)}. "
+                 f"Wśród nowych wpisów stowarzyszenia: {qualification.get('new_associations', 0)}. "
                  f"Nowe firmy bez zgodności z wybranymi kodami: {qualification.get('other_pkd', 0)}.")
         st.caption("Biuletyn obejmuje także zmiany istniejących firm i wpisy stowarzyszeń. "
                    "Do wyników trafiają wyłącznie potwierdzone nowe rejestracje ze zgodnymi kodami. "
                    "Brak odpisu nie jest traktowany jako brak dopasowania.")
+        st.caption(f"Wersja odczytu rejestru: {PARSER_VERSION}. "
+                   "Wybór wszystkich kodów obejmuje również podmioty bez ujawnionych kodów.")
         reasons = Counter(error.partition(": ")[2] or error for error in report.errors)
         for reason, count in reasons.items():
             st.write(f"{count} przypadków: {reason}")

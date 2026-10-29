@@ -33,7 +33,7 @@ https://prs.ms.gov.pl/krs/openApi
 Tabela, kontakty i eksportowane firmy obejmują wyłącznie podmioty:
 
 - z potwierdzoną pierwszą rejestracją w wybranym dniu;
-- z rejestru przedsiębiorców;
+- z rejestru przedsiębiorców lub stowarzyszeń (od wersji 2026-10-29.4);
 - ze zgodnym wybranym kodem w działalności przeważającej lub dodatkowej.
 
 Nie wyświetlamy długiej listy niezweryfikowanych numerów jako wyników.
@@ -87,3 +87,29 @@ Sprawdzenie po zmianie: ponowne przetworzenie wszystkich 321 odpisów
 zapisanych podczas badania na żywo odtworzyło wynik 319 + 2 bez błędów.
 Kontrola dodatnia na rzeczywistym odpisie nowej firmy 0001275848 z 28 października
 zwróciła jedną zgodną firmę przy wszystkich wybranych kodach.
+
+## Wersja 2026-10-29.4 — przedsiębiorcy i stowarzyszenia
+
+Zakres rozszerzono na obie części rejestru, zgodnie ze zmianą wymagań.
+Data filtrowania pochodzi z `naglowekA.dataRejestracjiWKRS` odpisu właściwej
+części (P lub S), nie z daty ostatniej zmiany. Potwierdzono tę datę na nowych
+wpisach z 28.10.2026. Przy wszystkich branżach podmioty bez ujawnionych kodów
+również trafiają do wyników; przy konkretnych kodach wymagane jest dopasowanie.
+
+Obsłużono `danePodmiotuZagranicznego` i `siedzibaIAdresPodmiotuZagranicznego`.
+Bez tego odpis nowego przedsiębiorcy 0001275317 kończył się błędem mimo
+poprawnej daty. Eksport zawiera informację o części rejestru.
+
+Pełna weryfikacja 3200 różnych numerów z biuletynu 28.10.2026: 245 nowych
+przedsiębiorców i 22 nowe stowarzyszenia, razem 267 wyników; 2933 podmioty
+z inną datą. Zweryfikowano również 218 przypadków bez aktualnego odpisu,
+korzystając z pełnej historii. Końcowy raport ma 3200 rozpatrzonych numerów
+bez błędów. Wynik odtworzono z zapisanych odpowiedzi, pokazano 267 wierszy
+w interfejsie i sprawdzono oba eksporty.
+
+W działającym hoście aktualizacja samego pliku aplikacji nie może pozostawić
+starego zaimportowanego modułu odczytu. Aplikacja sprawdza numer wersji
+parsera i w razie niezgodności przeładowuje moduł. Raporty utworzone przez
+starszą wersję są usuwane z sesji. Numer wersji jest widoczny w lewym panelu.
+To zabezpieczenie wdrożenia; nie ustalono bezpośrednio wersji modułu działającego
+w sesji użytkownika, która wyświetliła zero.

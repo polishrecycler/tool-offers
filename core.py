@@ -18,6 +18,7 @@ from pkd_catalog import PKD_OPTIONS
 WARSAW = ZoneInfo("Europe/Warsaw")
 API = "https://api-krs.ms.gov.pl/api/krs"
 DEFAULT_PKD = ("37", "38", "39")
+PARSER_VERSION = "2026-10-29.4"
 ALL_PKD_FILTERS = frozenset(re.sub(r"[^0-9A-Z]", "", code) for code in PKD_OPTIONS)
 
 
@@ -130,9 +131,7 @@ def _check_full_extract(client, number: str, registry: str, target: date, qualif
     payload = json_get(client, f"{API}/OdpisPelny/{number}", {"rejestr": registry, "format": "json"})
     try:
         header = payload["odpis"]["naglowekP"]
-        if extract_registry(header, number) != "P":
-            count_qualification(qualification, "outside_business_registry")
-            return None
+        extract_registry(header, number)
         first = [entry for entry in header["wpis"] if str(entry.get("numerWpisu")) == "1"]
         if len(first) != 1:
             raise DataError("Nie można jednoznacznie ustalić pierwszej rejestracji z odpisu pełnego.")
@@ -214,6 +213,7 @@ class Company:
     sources: list[dict] = field(default_factory=list)
     contact_status: str = "Nie wyszukiwano w internecie"
     krs_source: str = ""
+    registry: str = "P"
 
 
 def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PKD,
@@ -221,16 +221,16 @@ def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PK
     try:
         extract = payload["odpis"]
         header = extract["naglowekA"]
-        if extract_registry(header, number) != "P":
-            count_qualification(qualification, "outside_business_registry")
-            return None
+        registry = extract_registry(header, number)
         registered = parse_date(header["dataRejestracjiWKRS"])
         if registered != target:
             count_qualification(qualification, "other_registration_date")
             return None  # Date of registration, NEVER date of the latest entry.
         count_qualification(qualification, "new_registrations")
+        if registry == "S":
+            count_qualification(qualification, "new_associations")
         data = extract["dane"]
-        business = data["dzial3"]["przedmiotDzialalnosci"]
+        business = data.get("dzial3", {}).get("przedmiotDzialalnosci", {}) or {}
         entries = list(business.get("przedmiotPrzewazajacejDzialalnosci", []))
         if not main_only:
             entries += business.get("przedmiotPozostalejDzialalnosci", [])
@@ -241,22 +241,21 @@ def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PK
             code = entry_pkd_code(entry)
             if all_industries or normalize_pkd(code).startswith(filter_codes):
                 matches.append(f"{code} — {entry.get('opis', '')}")
-        if not matches:
-            if all_industries:
-                raise DataError("Nowa firma nie ma kodów działalności pozwalających zweryfikować jej profil.")
+        if not matches and not all_industries:
             count_qualification(qualification, "other_pkd")
             return None
         first = data["dzial1"]
-        entity = first["danePodmiotu"]
+        entity = first.get("danePodmiotu") or first["danePodmiotuZagranicznego"]
         ids = entity.get("identyfikatory", {})
-        address = first.get("siedzibaIAdres", {}).get("adres", {})
+        address = (first.get("siedzibaIAdres") or first.get("siedzibaIAdresPodmiotuZagranicznego", {})).get("adres", {})
         address_text = " ".join(str(address.get(k, "")) for k in
                                 ("ulica", "nrDomu", "nrLokalu", "kodPocztowy", "miejscowosc")).strip()
         return Company(number, entity["nazwa"], registered.isoformat(),
                        nip=ids.get("nip", ""), regon=ids.get("regon", ""), address=address_text,
                        pkd=sorted(set(matches)), emails=contact_values(first, "adresPocztyElektronicznej"),
                        websites=contact_values(first, "adresStronyInternetowej"),
-                       krs_source=f"{API}/OdpisAktualny/{number}?rejestr=P&format=json")
+                       krs_source=f"{API}/OdpisAktualny/{number}?rejestr={registry}&format=json",
+                       registry=registry)
     except (KeyError, TypeError, AttributeError) as exc:
         raise DataError("Niepełny lub nieznany format odpisu KRS; wpis wymaga ponownego sprawdzenia.") from exc
 
@@ -274,6 +273,7 @@ class Report:
     demo: bool = False
     contact_errors: list[str] = field(default_factory=list)
     qualification: dict[str, int] = field(default_factory=dict)
+    parser_version: str = PARSER_VERSION
 
     @property
     def complete(self):
