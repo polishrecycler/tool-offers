@@ -6,7 +6,7 @@ import streamlit as st
 import core
 
 # A source update must not retain an older imported parser in a running host.
-if getattr(core, "PARSER_VERSION", None) != "2026-10-29.4":
+if getattr(core, "PARSER_VERSION", None) != "2026-10-29.5":
     importlib.reload(core)
 
 from contacts import enrich_contacts, search_url
@@ -60,13 +60,17 @@ with st.sidebar:
     target = st.date_input("Data wpisu do rejestru przedsiębiorców lub stowarzyszeń",
                            value=yesterday(), max_value=yesterday())
     selected_pkd = pkd_picker()
+    pending_pkd = set(st.session_state.get("draft_pkd", selected_pkd)) != set(selected_pkd)
+    if pending_pkd:
+        st.warning("Wybór kodów został zmieniony, ale nie jest zatwierdzony. "
+                   "Kliknij „Zatwierdź” w menu kodów przed pobraniem raportu.")
     if not selected_pkd:
         st.caption("Wybierz co najmniej jeden kod, aby pobrać firmy.")
     web = st.checkbox("Szukaj kontaktów w internecie", value=True,
                       key="search_contacts",
                       help="Sprawdza publiczne wyniki wyszukiwania. Dane z fragmentów stron "
                            "wymagają potwierdzenia i nie zawsze są dostępne.")
-    run = st.button("Pobierz firmy z KRS", type="primary", width="stretch", disabled=not selected_pkd,
+    run = st.button("Pobierz firmy z KRS", type="primary", width="stretch", disabled=not selected_pkd or pending_pkd,
                     key="fetch_companies")
     st.caption("„Wczoraj” jest wyliczane według czasu w Polsce. "
                "Pobieranie odpisów dużej liczby firm może potrwać kilka minut.")
@@ -75,11 +79,11 @@ with st.sidebar:
 st.info("Lista dotyczy pierwszej rejestracji w KRS. Późniejsze zmiany wpisów są odrzucane. "
         "Kody PKD i kontakty w KRS są odczytywane z odpisu aktualnego.")
 
-if run and selected_pkd:
+if run and selected_pkd and not pending_pkd:
     st.session_state.pop("report", None)
     try:
         filters = tuple(selected_pkd)
-        bar = st.progress(0.0, "Łączenie z KRS…")
+        bar = st.progress(0.0, f"Pobieranie danych dla {target.isoformat()} — {len(filters)} zatwierdzonych kodów…")
         def update(done, total, message):
             bar.progress(done / total if total else 0.0, message)
         report = collect(target, filters, main_only=False,

@@ -1,0 +1,29 @@
+{
+  "odpis": {
+    "naglowekA": {
+      "numerKRS": "0001272047",
+      "rejestr": "RejP",
+      "dataRejestracjiWKRS": "09.10.2026",
+      "dataOstatniegoWpisu": "10.10.2026"
+    },
+    "dane": {
+      "dzial1": {
+        "danePodmiotu": {
+          "nazwa": "BH DEVELOPMENT V SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ"
+        }
+      },
+      "dzial3": {
+        "przedmiotDzialalnosci": {
+          "przedmiotPrzewazajacejDzialalnosci": [
+            {
+              "opis": "POZOSTAŁE SPECJALISTYCZNE ROBOTY BUDOWLANE, GDZIE INDZIEJ NIESKLASYFIKOWANE",
+              "kodDzial": "43",
+              "kodKlasa": "99",
+              "kodPodklasa": "Z"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -113,3 +113,24 @@ parsera i w razie niezgodności przeładowuje moduł. Raporty utworzone przez
 starszą wersję są usuwane z sesji. Numer wersji jest widoczny w lewym panelu.
 To zabezpieczenie wdrożenia; nie ustalono bezpośrednio wersji modułu działającego
 w sesji użytkownika, która wyświetliła zero.
+
+## Wersja 2026-10-29.5 — przypadek 0001272047 z 9 października
+
+Ponownie odczytano biuletyn 09.10.2026: 3358 różnych numerów. Spółka
+0001272047 znajduje się zarówno w nim, jak i w biuletynie 10.10.2026.
+Hipoteza o braku jej numeru w biuletynie 9 października nie potwierdziła się.
+W zapisanym odpisie ma datę rejestracji 09.10.2026 i kod 43.99.Z.
+Minimalny wyciąg z rzeczywistej odpowiedzi, bez danych osób i adresów,
+zapisano jako przypadek regresyjny w tests/fixtures.
+
+Sprawdzono pozytywne dopasowanie przy 43.99.Z i wszystkich 728 kodach oraz
+negatywne przy kodach odpadowych. Test od formularza przez zatwierdzenie do
+pobrania i tabeli używa rzeczywistej funkcji collect i zapisanego odpisu.
+Nie jest to test pobrania wszystkich 3358 odpisów.
+
+Usunięto pułapkę interfejsu: po zmianie roboczych zaznaczeń przycisk pobierania
+był aktywny i pozwalał pobrać raport ze starym, zatwierdzonym wcześniej filtrem.
+Teraz wymaga zatwierdzenia lub odrzucenia roboczych zmian. Pasek pobierania
+pokazuje datę i liczbę zatwierdzonych kodów. Podniesiono wersję odczytu,
+aby nie korzystać z poprzednich wyników sesji. Nie potwierdzono bezpośrednio,
+który stan filtrów spowodował zerowy wynik w sesji użytkownika.

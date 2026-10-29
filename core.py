@@ -18,7 +18,7 @@ from pkd_catalog import PKD_OPTIONS
 WARSAW = ZoneInfo("Europe/Warsaw")
 API = "https://api-krs.ms.gov.pl/api/krs"
 DEFAULT_PKD = ("37", "38", "39")
-PARSER_VERSION = "2026-10-29.4"
+PARSER_VERSION = "2026-10-29.5"
 ALL_PKD_FILTERS = frozenset(re.sub(r"[^0-9A-Z]", "", code) for code in PKD_OPTIONS)
 
 

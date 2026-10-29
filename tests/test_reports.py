@@ -559,8 +559,39 @@ core.PARSER_VERSION = "old-version"
 core.company_from_extract = lambda *a, **k: None
 app = AppTest.from_file("app.py").run()
 assert not app.exception
-assert core.PARSER_VERSION == "2026-10-29.4"
+assert core.PARSER_VERSION == "2026-10-29.5"
 assert core.company_from_extract.__name__ == "company_from_extract"
 '''
     subprocess.run([sys.executable, "-c", code], check=True,
                    cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
+
+
+def test_real_bh_company_through_select_all_confirmation_and_report(monkeypatch):
+    import json
+    from unittest.mock import Mock
+    from streamlit.testing.v1 import AppTest
+    payload = json.loads((Path(__file__).parent / "fixtures" / "bh_development_0001272047.json").read_text())
+    client = Client([Response(["1272047"]), Response(payload)])
+    monkeypatch.setattr("core.session", lambda: client)
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    monkeypatch.setattr("core.save_report", Mock())
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    app.button(key="clear_pkd").click().run()
+    app.checkbox(key="pkd_select_all").check().run()
+    assert app.button(key="fetch_companies").disabled
+    assert any("nie jest zatwierdzony" in warning.value for warning in app.warning)
+    app.button(key="apply_pkd").click().run()
+    assert not app.button(key="fetch_companies").disabled
+    app.sidebar.date_input[0].set_value(date(2026, 10, 9))
+    app.checkbox(key="search_contacts").uncheck()
+    app.button(key="fetch_companies").click().run()
+    assert not app.exception
+    report = app.session_state["report"]
+    assert report.complete
+    assert report.target_date == "2026-10-09"
+    assert len(report.filters) == 728
+    assert [c.krs for c in report.companies] == ["0001272047"]
+    assert len(app.dataframe[0].value) == 1
+    assert client.calls[0][0][0].endswith("/Biuletyn/2026-10-09")
+    assert company_from_extract(payload, "0001272047", date(2026,10,9), ("43.99.Z",))
+    assert company_from_extract(payload, "0001272047", date(2026,10,9), ("38.11.Z",)) is None
