@@ -291,6 +291,7 @@ def test_app_selected_subclasses_and_both_downloads(extract, monkeypatch):
     assert [button.proto.label for button in downloads] == [
         "Eksport do Excela (.xlsx)", "Eksport do PDF"]
     assert all(button.proto.url for button in downloads)
+    assert all(not expander.proto.expanded for expander in app.expander)
 
 
 def test_app_empty_selection_does_not_fetch(monkeypatch):
@@ -372,3 +373,42 @@ def test_unverified_numbers_are_not_displayed_as_a_company_list():
     assert not app.get("download_button")
     assert not any("0000002664" in text.value for text in app.markdown)
     assert any("część danych jest" in warning.value for warning in app.warning)
+    assert all(not expander.proto.expanded for expander in app.expander)
+
+
+def test_complete_official_pkd_catalog_is_available():
+    import re
+    from pkd_catalog import PKD_OPTIONS
+    # The statutory PKD 2025 structure lists 728 subclasses, including sectors
+    # deliberately absent from the previous waste-only catalogue.
+    assert len(PKD_OPTIONS) == 728
+    assert all(re.fullmatch(r"\d{2}\.\d{2}\.[A-Z]", code) for code in PKD_OPTIONS)
+    assert PKD_OPTIONS["01.12.Z"] == "Uprawa ryżu"
+    assert PKD_OPTIONS["62.10.B"] == "Pozostała działalność w zakresie programowania"
+    assert PKD_OPTIONS["99.00.Z"] == "Organizacje i zespoły eksterytorialne"
+
+
+def test_user_can_search_and_fetch_an_industry_outside_waste(extract, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    from unittest.mock import Mock
+    business = extract["odpis"]["dane"]["dzial3"]["przedmiotDzialalnosci"]
+    business["przedmiotPrzewazajacejDzialalnosci"] = [
+        {"kodDzial": "62", "kodKlasa": "10", "kodPodklasa": "B", "opis": "Programowanie"}]
+    business["przedmiotPozostalejDzialalnosci"] = []
+    company = company_from_extract(extract, "0000123456", TARGET, ("62.10.B",))
+    report = Report(TARGET.isoformat(), "2026-10-29", ["62.10.B"], False,
+                    candidates=1, checked=1, companies=[company])
+    fetch = Mock(return_value=report)
+    monkeypatch.setattr("core.collect", fetch)
+    monkeypatch.setattr("core.save_report", Mock())
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    app.button(key="clear_pkd").click().run()
+    app.text_input(key="pkd_search").set_value("62.10").run()
+    app.checkbox(key="pkd_option_62.10.B").check().run()
+    assert app.get("popover")[0].proto.popover.label == "62.10.B"
+    app.sidebar.date_input[0].set_value(TARGET)
+    app.checkbox(key="search_contacts").uncheck()
+    app.button(key="fetch_companies").click().run()
+    assert not app.exception
+    assert fetch.call_args.args == (TARGET, ("62.10.B",))
+    assert len(app.dataframe) == 1

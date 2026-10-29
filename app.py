@@ -20,6 +20,20 @@ st.html("""
     overflow-wrap: anywhere;
     font-variant-numeric: tabular-nums;
 }
+.st-key-clear_pkd button {
+    color: #b42318;
+    border-color: #f2b8b5;
+    background-color: #fff5f5;
+}
+.st-key-clear_pkd button:hover:not(:disabled) {
+    color: #912018;
+    border-color: #d92d20;
+    background-color: #fee4e2;
+}
+.st-key-clear_pkd button:focus-visible {
+    outline: 2px solid #d92d20;
+    outline-offset: 2px;
+}
 </style>
 """)
 st.title("♻️ Nowe firmy: środowisko i odpady")
@@ -93,7 +107,7 @@ if report:
         right.download_button("Eksport do PDF", pdf_bytes(report),
                               file_name=f"firmy-krs-{report.target_date}.pdf",
                               mime="application/pdf", width="stretch")
-        with st.expander("Kontakty i źródła dopasowanych firm"):
+        with st.expander("Kontakty i źródła dopasowanych firm", expanded=False):
             st.write("Adresy e-mail i WWW z KRS są danymi ujawnionymi w rejestrze. "
                      "Kontakty z internetu wymagają potwierdzenia. Brak kontaktu nie oznacza, że firma go nie ma.")
             for company in report.companies:

@@ -41,6 +41,7 @@ def pkd_picker() -> list[str]:
     selected = st.session_state["selected_pkd"]
     st.markdown("Branże — kody PKD", help=(
         "PKD to Polska Klasyfikacja Działalności. Otwórz listę i wyszukaj kod lub opis. "
+        "Dostępny jest pełny wykaz 728 szczegółowych kodów klasyfikacji 2025. "
         "Możesz zaznaczyć wiele branż. Wyszukiwanie firm obejmuje działalność "
         "przeważającą i dodatkową."))
     field, clear = st.columns([9, 1], gap="small", vertical_alignment="top")
@@ -48,7 +49,7 @@ def pkd_picker() -> list[str]:
         summary = ", ".join(selected) if selected else "Wybierz kody PKD"
         with st.popover(summary, width="stretch", wrap=True, key="pkd_picker"):
             query = st.text_input("Szukaj kodu lub opisu", key="pkd_search",
-                                  placeholder="Np. 38.21 lub akumulatory", live=True,
+                                  placeholder="Wpisz dowolny kod lub nazwę branży", live=True,
                                   icon=":material/search:")
             terms = _search_text(query).split()
             visible = [code for code in PKD_OPTIONS
@@ -63,7 +64,7 @@ def pkd_picker() -> list[str]:
                     st.checkbox(pkd_label(code), key=key, on_change=_toggle, args=(code,))
             st.caption(f"Wybrano: {len(selected)} · Widocznych kodów: {len(visible)}")
     with clear:
-        st.button("", icon=":material/filter_alt_off:", key="clear_pkd",
+        st.button("", icon=":material/delete:", key="clear_pkd",
                   help="Wyczyść wszystkie wybrane kody PKD", width="stretch",
                   on_click=_clear, disabled=not selected)
     return list(st.session_state["selected_pkd"])
