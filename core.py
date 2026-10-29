@@ -23,6 +23,12 @@ class DataError(RuntimeError):
     pass
 
 
+class KrsResponseError(DataError):
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def yesterday(now: datetime | None = None) -> date:
     return (now or datetime.now(WARSAW)).astimezone(WARSAW).date() - timedelta(days=1)
 
@@ -30,20 +36,46 @@ def yesterday(now: datetime | None = None) -> date:
 def session() -> requests.Session:
     result = requests.Session()
     result.headers["User-Agent"] = "ToolOffers/0.1 (public KRS research)"
+    result.headers["Accept"] = "application/json"
     retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504],
-                  allowed_methods=["GET"], respect_retry_after_header=True)
+                  allowed_methods=["GET"], respect_retry_after_header=True, raise_on_status=False)
     result.mount("https://", HTTPAdapter(max_retries=retry))
     return result
 
 
 def json_get(client, url: str, params=None):
-    try:
-        response = client.get(url, params=params, timeout=(10, 45))
-        response.raise_for_status()
-        return response.json()
-    except (requests.RequestException, ValueError) as exc:
-        raise DataError(f"Nie można pobrać danych KRS ({type(exc).__name__}). "
-                        "Sprawdź dostęp do api-krs.ms.gov.pl oraz dostępność API.") from exc
+    # The server sometimes returns an empty response or a non-JSON error page.
+    # HTTP failures are retried by the session adapter; malformed bodies need
+    # their own bounded retry. A 204 is a valid "no current extract" response.
+    for attempt in range(3):
+        try:
+            response = client.get(url, params=params, timeout=(10, 45))
+            status_code = getattr(response, "status_code", 200)
+            if status_code == 204:
+                raise KrsResponseError(204, "Rejestr nie udostępnia aktualnego odpisu (kod odpowiedzi 204).")
+            if status_code == 404:
+                raise KrsResponseError(404, "Brak odpisu w wybranej części rejestru (kod odpowiedzi 404).")
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, (dict, list)):
+                raise ValueError("Unexpected response body")
+            return payload
+        except requests.HTTPError as exc:
+            code = getattr(response, "status_code", None)
+            raise DataError(f"Serwer rejestru odrzucił pobranie odpisu (kod odpowiedzi {code or 'nieznany'}). "
+                            "Nie oznacza to braku firmy ani niezgodności jej działalności.") from exc
+        except requests.Timeout as exc:
+            raise DataError("Przekroczono czas oczekiwania na odpowiedź rejestru. Spróbuj ponownie.") from exc
+        except requests.RequestException as exc:
+            # JSONDecodeError also inherits RequestException in requests.
+            if not isinstance(exc, ValueError):
+                raise DataError("Nie udało się połączyć z rejestrem podczas pobierania odpisu.") from exc
+            if attempt == 2:
+                raise DataError("Serwer rejestru trzykrotnie zwrócił pustą lub nieczytelną odpowiedź.") from exc
+        except ValueError as exc:
+            if attempt == 2:
+                raise DataError("Serwer rejestru trzykrotnie zwrócił pustą lub nieczytelną odpowiedź.") from exc
+        time.sleep(0.5 * (attempt + 1))
 
 
 def krs_number(value) -> str:
@@ -75,6 +107,64 @@ def parse_date(value: str) -> date:
 
 def normalize_pkd(value: str) -> str:
     return re.sub(r"[^0-9A-Z]", "", value.upper())
+
+
+def extract_registry(header: dict, number: str) -> str:
+    if krs_number(header["numerKRS"]) != number:
+        raise DataError("Numer KRS odpisu nie odpowiada żądanemu numerowi.")
+    registry = {"P": "P", "RejP": "P", "S": "S", "RejS": "S"}.get(header.get("rejestr"))
+    if registry is None:
+        raise DataError("Nieznane oznaczenie części rejestru w odpisie.")
+    return registry
+
+
+def _check_full_extract(client, number: str, registry: str, target: date):
+    """Use history only to exclude old/non-business entities, never as current PKD."""
+    payload = json_get(client, f"{API}/OdpisPelny/{number}", {"rejestr": registry, "format": "json"})
+    try:
+        header = payload["odpis"]["naglowekP"]
+        if extract_registry(header, number) != "P":
+            return None
+        first = [entry for entry in header["wpis"] if str(entry.get("numerWpisu")) == "1"]
+        if len(first) != 1:
+            raise DataError("Nie można jednoznacznie ustalić pierwszej rejestracji z odpisu pełnego.")
+        if parse_date(first[0]["dataWpisu"]) != target:
+            return None
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise DataError("Nie można ustalić pierwszej rejestracji z odpisu pełnego.") from exc
+    raise DataError("Firma została zarejestrowana w wybranym dniu, ale nie ma aktualnego odpisu. "
+                    "Nie można potwierdzić jej obecnych kodów działalności.")
+
+
+def current_extract(client, number: str, target: date):
+    try:
+        return json_get(client, f"{API}/OdpisAktualny/{number}", {"rejestr": "P", "format": "json"})
+    except KrsResponseError as exc:
+        if exc.status_code == 204:
+            return _check_full_extract(client, number, "P", target)
+        if exc.status_code != 404:
+            raise
+    # Daily bulletins include associations as well as entrepreneurs.
+    try:
+        return json_get(client, f"{API}/OdpisAktualny/{number}", {"rejestr": "S", "format": "json"})
+    except KrsResponseError as exc:
+        if exc.status_code == 204:
+            return _check_full_extract(client, number, "S", target)
+        raise DataError("Nie odnaleziono aktualnego odpisu pozwalającego zweryfikować firmę. "
+                        "Wynik pozostaje niepełny.") from exc
+
+
+def entry_pkd_code(entry: dict) -> str:
+    # KRS accepts a division, group, class or a full subclass. A broad
+    # entry must not break unrelated exact matches, nor prove a narrower code.
+    if not re.fullmatch(r"\d{2}", str(entry.get("kodDzial", ""))):
+        raise DataError("Brak poprawnego działu klasyfikacji w odpisie.")
+    parts = [str(entry[k]) for k in ("kodDzial", "kodKlasa", "kodPodklasa")
+             if entry.get(k) is not None]
+    code = ".".join(parts)
+    if not re.fullmatch(r"\d{2}(?:\.\d|\.\d{2}(?:\.[A-Z])?)?", code):
+        raise DataError("Nieznany format kodu działalności w odpisie.")
+    return code
 
 
 def pkd_filters(text: str) -> tuple[str, ...]:
@@ -121,14 +211,11 @@ def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PK
     try:
         extract = payload["odpis"]
         header = extract["naglowekA"]
+        if extract_registry(header, number) != "P":
+            return None
         registered = parse_date(header["dataRejestracjiWKRS"])
         if registered != target:
             return None  # Date of registration, NEVER date of the latest entry.
-        if krs_number(header["numerKRS"]) != number:
-            raise DataError("Numer KRS odpisu nie odpowiada żądanemu numerowi.")
-        # Only the entrepreneurs' register; bulletin can contain other entities.
-        if header.get("rejestr", "P") != "P":
-            return None
         data = extract["dane"]
         business = data["dzial3"]["przedmiotDzialalnosci"]
         entries = list(business.get("przedmiotPrzewazajacejDzialalnosci", []))
@@ -136,9 +223,7 @@ def company_from_extract(payload, number: str, target: date, prefixes=DEFAULT_PK
             entries += business.get("przedmiotPozostalejDzialalnosci", [])
         matches = []
         for entry in entries:
-            code = ".".join(str(entry[k]) for k in ("kodDzial", "kodKlasa", "kodPodklasa") if entry.get(k) is not None)
-            if not re.fullmatch(r"\d{2}\.\d{2}\.[A-Z]", code):
-                raise DataError("Nieznany format kodu PKD w odpisie.")
+            code = entry_pkd_code(entry)
             if any(normalize_pkd(code).startswith(normalize_pkd(p)) for p in prefixes):
                 matches.append(f"{code} — {entry.get('opis', '')}")
         if not matches:
@@ -169,6 +254,7 @@ class Report:
     companies: list[Company] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     demo: bool = False
+    contact_errors: list[str] = field(default_factory=list)
 
     @property
     def complete(self):
@@ -185,14 +271,13 @@ def collect(target: date, prefixes=DEFAULT_PKD, main_only=False,
     # Full daily bulletin; repeated changes to the same company are deduplicated.
     if progress:
         progress(0, 0, "Pobieranie dziennego biuletynu KRS")
-    payload = json_get(client, f"{API}/Biuletyn/{target.isoformat()}",
-                       {"godzinaOd": 0, "godzinaDo": 23})
+    payload = json_get(client, f"{API}/Biuletyn/{target.isoformat()}")
     numbers = bulletin_numbers(payload)
     report.candidates = len(numbers)
     for index, number in enumerate(sorted(numbers), 1):
         try:
-            payload = json_get(client, f"{API}/OdpisAktualny/{number}", {"rejestr": "P", "format": "json"})
-            company = company_from_extract(payload, number, target, prefixes, main_only)
+            payload = current_extract(client, number, target)
+            company = company_from_extract(payload, number, target, prefixes, main_only) if payload is not None else None
             report.checked += 1
             if company:
                 if enrich:
@@ -200,12 +285,13 @@ def collect(target: date, prefixes=DEFAULT_PKD, main_only=False,
                         enrich(company, client)
                     except Exception:
                         company.contact_status = "Błąd wyszukiwania — sprawdź ręcznie"
-                        report.errors.append(f"KRS {number}: nie udało się wyszukać kontaktów.")
+                        report.contact_errors.append(f"KRS {number}: nie udało się wyszukać kontaktów.")
                 report.companies.append(company)
         except DataError as exc:
             report.errors.append(f"KRS {number}: {exc}")
         if progress:
-            progress(index, report.candidates, f"Sprawdzono {index}/{report.candidates} odpisów")
+            progress(index, report.candidates,
+                     f"Sprawdzanie rejestru — potwierdzone firmy zgodne z kodami: {len(report.companies)}")
         time.sleep(0.2)
     return report
 

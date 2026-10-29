@@ -29,7 +29,8 @@ def rows(report: Report) -> list[dict]:
 def status(report):
     if report.demo:
         return "DEMO — dane fikcyjne"
-    return "Pełne sprawdzenie kandydatów" if report.complete else "Raport niepełny — sprawdź błędy"
+    return ("Sprawdzono wszystkie numery z biuletynu" if report.complete else
+            "Raport niepełny — nie wszystkie firmy udało się zweryfikować")
 
 
 def metadata(report):
@@ -37,8 +38,9 @@ def metadata(report):
             ("Wygenerowano", report.generated_at), ("Strefa czasowa", "Europe/Warsaw"),
             ("PKD", ", ".join(report.filters)),
             ("Zakres PKD", "Tylko przeważające" if report.main_only else "Wszystkie ujawnione"),
-            ("Kandydaci z biuletynu", report.candidates), ("Sprawdzone odpisy", report.checked),
+            ("Numery z biuletynu", report.candidates), ("Rozpatrzone numery firm", report.checked),
             ("Firmy pasujące", len(report.companies)),
+            ("Problemy z wyszukiwaniem kontaktów", len(report.contact_errors)),
             ("Uwaga", "Data pierwszej rejestracji w KRS. PKD i kontakty KRS pochodzą z odpisu aktualnego. "
              "Pierwszy wpis nie oznacza daty zawarcia umowy spółki. Wyniki internetu wymagają potwierdzenia. "
              "Brak wyniku nie dowodzi braku danych kontaktowych.")]
@@ -64,7 +66,7 @@ def xlsx_bytes(report: Report) -> bytes:
         meta.append([key, literal(value)])
     errors = book.create_sheet("Błędy")
     errors.append(["Problemy do ponownego sprawdzenia"])
-    for error in report.errors:
+    for error in report.errors + report.contact_errors:
         errors.append([literal(error)])
     sources = book.create_sheet("Źródła kontaktów")
     sources.append(["KRS", "Nazwa firmy", "URL", "Tytuł", "Fragment wyniku", "Dopasowanie", "E-mail", "Telefon"])
@@ -124,6 +126,9 @@ def pdf_bytes(report: Report) -> bytes:
     if report.errors:
         story.append(p("Błędy — raport wymaga ponownego sprawdzenia:"))
         story.extend(p(error) for error in report.errors)
+    if report.contact_errors:
+        story.append(p("Nie udało się uzupełnić kontaktów (dopasowanie firm pozostaje potwierdzone):"))
+        story.extend(p(error) for error in report.contact_errors)
     out = BytesIO()
     def footer(canvas, doc):
         canvas.setFont("DejaVu", 8)

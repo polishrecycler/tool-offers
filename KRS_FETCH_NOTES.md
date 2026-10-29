@@ -1,0 +1,64 @@
+# Pobieranie i kwalifikacja wyników
+
+## Przyczyny naprawione 29 października 2026 r.
+
+Sprawdzono rzeczywiste odpowiedzi publicznego rejestru, w tym przykłady
+ze zrzutu ekranu użytkownika. Dokumentacja źródła:
+https://prs.ms.gov.pl/krs/openApi
+
+1. Nagłówek odpisu przedsiębiorcy ma oznaczenie `RejP`, a nie tylko `P`.
+   Poprzednie porównanie odrzucało poprawne nowe rejestracje. Teraz parser
+   obsługuje `RejP` / `P` oraz `RejS` / `S`, sprawdzając również numer odpisu.
+2. Biuletyn obejmuje przedsiębiorców i stowarzyszenia. Przykładowo
+   0000002664 i 0000002667 nie mają odpisu w części P (odpowiedź 404),
+   ale mają odpis w części S. To nie jest brak połączenia z serwerem.
+3. Numery 0000005142 i 0000006864 zwracają 204, czyli odpowiedź bez treści
+   dla odpisu aktualnego. Nie próbujemy odczytywać jej jak dokumentu JSON
+   (formatu danych zwracanego przez rejestr). Odpis pełny pozwala potwierdzić
+   starą rejestrację i wykluczyć podmiot z raportu nowych firm.
+4. Pełna historia ma `naglowekP` i listę `wpis`. Do ustalenia pierwszej
+   rejestracji używamy wpisu numer 1. Nie odczytujemy historycznych kodów jako
+   aktualnych. Nowa firma bez aktualnego odpisu pozostaje nieweryfikowana,
+   zamiast znikać jako rzekomo niezgodna z filtrami.
+5. Rejestr zwraca kody na poziomie działu, grupy, klasy i podklasy, np.
+   `33`, `93.1`, `38.11`, `38.11.Z`. Szeroki wpis nie przerywa sprawdzania
+   dokładnych kodów. Sam dział lub grupa nie potwierdza wybranej podklasy.
+6. Nieczytelne odpowiedzi są ponawiane maksymalnie trzykrotnie. Pozostałe
+   błędy zachowują kod odpowiedzi serwera, zamiast sugerować zawsze brak
+   dostępu do sieci. Odpowiedzi przejściowe i ograniczenia tempa są ponawiane
+   przez klienta z opóźnieniem oraz uwzględnieniem wskazówek serwera.
+
+## Co pokazuje aplikacja
+
+Tabela, kontakty i eksportowane firmy obejmują wyłącznie podmioty:
+
+- z potwierdzoną pierwszą rejestracją w wybranym dniu;
+- z rejestru przedsiębiorców;
+- ze zgodnym wybranym kodem w działalności przeważającej lub dodatkowej.
+
+Nie wyświetlamy długiej listy niezweryfikowanych numerów jako wyników.
+Podsumowanie techniczne jest zwinięte i pokazuje liczby oraz pogrupowane
+przyczyny problemów, bez listy numerów. Błędy źródła nadal oznaczają raport
+niepełny: brak potwierdzonych dopasowań nie oznacza wtedy braku nowych firm.
+Przy zerowej liczbie dopasowań nie pokazujemy pustych eksportów ani kontaktów.
+
+Zmiana daty lub wybranych kodów usuwa z widoku poprzedni raport. Użytkownik
+musi uruchomić pobieranie dla nowych ustawień. Przycisk eksportu nie może
+wtedy pobrać danych pasujących do poprzedniego wyboru.
+
+Wyszukiwanie kontaktów to osobny etap. Jego niepowodzenie nie zmienia
+potwierdzonej daty rejestracji i dopasowania kodów, dlatego problemy kontaktów
+są przechowywane oddzielnie od błędów weryfikacji rejestru. Szczegóły błędów
+pozostają w zapisanym raporcie i w diagnostycznej części eksportów.
+
+## Weryfikacja na żywo
+
+Ograniczona próba dziewięciu numerów, obejmująca przykłady powyżej,
+nową zgodną firmę 0001275848 i nową niezgodną firmę 0001275898:
+9 rozpatrzonych numerów, 1 zgodna firma, 0 błędów. Sprawdzono też eksport
+do Excela i PDF (dokumentu do czytania i drukowania).
+
+To nie jest potwierdzenie pobrania całego dziennego biuletynu ani gwarancja
+stałej dostępności zewnętrznego serwera. Program nadal musi pobrać dane
+nieznanych firm przed sprawdzeniem kodów; ta zmiana nie dodaje trwałej bazy
+ani nie usuwa konieczności skanowania biuletynu.

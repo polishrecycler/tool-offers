@@ -1,9 +1,10 @@
 from pathlib import Path
+from collections import Counter
 
 import streamlit as st
 
 from contacts import enrich_contacts, search_url
-from core import DataError, collect, save_report, yesterday
+from core import DataError, collect, normalize_pkd, save_report, yesterday
 from exports import pdf_bytes, rows, status, xlsx_bytes
 from pkd_picker import pkd_picker
 
@@ -54,18 +55,20 @@ if run and selected_pkd:
                          enrich=enrich_contacts if web else None, progress=update)
         save_report(report, ROOT / "reports")
         st.session_state["report"] = report
-        bar.empty()
     except DataError as exc:
         st.error(str(exc))
         st.warning("Nie utworzono raportu. Nie oznacza to braku nowych firm. "
-                   "Jeżeli to pierwsze uruchomienie, sprawdź w ustawieniach środowiska "
-                   "dostęp do api-krs.ms.gov.pl i www.bing.com.")
+                   "Spróbuj ponownie; przyczyna problemu jest opisana powyżej.")
     except OSError:
         st.error("Nie udało się zapisać raportu. Sprawdź dostępne miejsce i prawa zapisu w folderze reports.")
+    finally:
+        bar.empty()
 
 report = st.session_state.get("report")
-# Do not keep an old demo report visible in an existing browser session.
-if report and report.demo:
+# Never present a previous query's rows as matches for the current controls.
+if report and (report.demo or report.main_only or report.target_date != target.isoformat()
+               or {normalize_pkd(code) for code in report.filters}
+               != {normalize_pkd(code) for code in selected_pkd}):
     st.session_state.pop("report", None)
     report = None
 if report:
@@ -74,43 +77,49 @@ if report:
         st.warning(status(report))
     else:
         st.success(status(report))
-    a, b, c = st.columns(3)
-    a.metric("Wpisy z biuletynu", report.candidates)
-    b.metric("Sprawdzone odpisy", report.checked)
-    c.metric("Firmy pasujące do PKD", len(report.companies))
+    st.metric("Potwierdzone firmy zgodne z wybranymi kodami", len(report.companies))
     st.caption(f"PKD: {', '.join(report.filters)} · "
                f"Działalność przeważająca i dodatkowa · "
                f"Wygenerowano: {report.generated_at}")
     records = rows(report)
     if records:
         st.dataframe(records, hide_index=True, width="stretch")
-    else:
-        st.write("Brak firm spełniających kryteria w sprawdzonych odpisach. "
-                 "Przed wyciągnięciem wniosków sprawdź kompletność raportu.")
-    st.write("**Eksport wyników**")
-    left, right = st.columns(2)
-    left.download_button("Eksport do Excela (.xlsx)", xlsx_bytes(report),
-                         file_name=f"firmy-krs-{report.target_date}.xlsx",
-                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         width="stretch")
-    right.download_button("Eksport do PDF", pdf_bytes(report),
-                          file_name=f"firmy-krs-{report.target_date}.pdf",
-                          mime="application/pdf", width="stretch")
-    with st.expander("Kontakty i źródła"):
-        st.write("Adresy e-mail i WWW z KRS są danymi ujawnionymi w rejestrze. "
-                 "Kontakty z internetu pochodzą z fragmentów wyników wyszukiwania. "
-                 "Sprawdź, czy strona należy do właściwej firmy; brak kontaktu nie oznacza, że firma go nie ma.")
-        for company in report.companies:
-            st.write(f"**{company.name}** — KRS {company.krs}")
-            if not report.demo:
+        st.write("**Eksport dopasowanych firm**")
+        left, right = st.columns(2)
+        left.download_button("Eksport do Excela (.xlsx)", xlsx_bytes(report),
+                             file_name=f"firmy-krs-{report.target_date}.xlsx",
+                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             width="stretch")
+        right.download_button("Eksport do PDF", pdf_bytes(report),
+                              file_name=f"firmy-krs-{report.target_date}.pdf",
+                              mime="application/pdf", width="stretch")
+        with st.expander("Kontakty i źródła dopasowanych firm"):
+            st.write("Adresy e-mail i WWW z KRS są danymi ujawnionymi w rejestrze. "
+                     "Kontakty z internetu wymagają potwierdzenia. Brak kontaktu nie oznacza, że firma go nie ma.")
+            for company in report.companies:
+                st.write(f"**{company.name}** — KRS {company.krs}")
                 st.link_button("Sprawdź wyniki wyszukiwania", search_url(company))
-            st.write(company.contact_status)
-            for source in company.sources:
-                st.write({"Źródło": source["url"], "Dopasowanie": source["match"],
-                          "Fragment": source["snippet"]})
-    if report.errors:
-        with st.expander(f"Błędy do sprawdzenia ({len(report.errors)})", expanded=True):
-            for error in report.errors:
-                st.write(error)
+                st.write(company.contact_status)
+                for source in company.sources:
+                    st.write({"Źródło": source["url"], "Dopasowanie": source["match"],
+                              "Fragment": source["snippet"]})
+    elif report.complete:
+        st.info("Nie znaleziono nowych firm z wybranymi kodami w tym dniu.")
+    else:
+        st.warning("Nie potwierdzono dotąd żadnej zgodnej firmy. Ponieważ część danych jest "
+                   "niedostępna, nie można uznać tego za pełny wynik wyszukiwania.")
+    if report.contact_errors:
+        st.caption(f"Nie udało się uzupełnić kontaktów dla {len(report.contact_errors)} dopasowanych firm. "
+                   "Nie wpływa to na potwierdzenie ich daty rejestracji i kodów działalności.")
+    with st.expander("Podsumowanie pobierania", expanded=False):
+        st.write(f"Numery firm w dziennym biuletynie: {report.candidates}. "
+                 f"Rozpatrzone: {report.checked}. "
+                 f"Nieweryfikowane z powodu problemów pobierania: {report.candidates - report.checked}.")
+        st.caption("Biuletyn obejmuje także zmiany istniejących firm i wpisy stowarzyszeń. "
+                   "Do wyników trafiają wyłącznie potwierdzone nowe rejestracje ze zgodnymi kodami. "
+                   "Brak odpisu nie jest traktowany jako brak dopasowania.")
+        reasons = Counter(error.partition(": ")[2] or error for error in report.errors)
+        for reason, count in reasons.items():
+            st.write(f"{count} przypadków: {reason}")
 else:
     st.write("Wybierz datę i branże po lewej, a następnie kliknij **Pobierz firmy z KRS**.")

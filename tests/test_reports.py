@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 import requests
 
 from core import (DataError, Report, bulletin_numbers, collect, company_from_extract,
-                  pkd_filters, yesterday)
+                  current_extract, json_get, pkd_filters, yesterday)
 from contacts import enrich_contacts
 from demo import demo_report
 from exports import pdf_bytes, xlsx_bytes
@@ -18,7 +18,7 @@ TARGET = date(2026, 10, 27)
 @pytest.fixture
 def extract():
     return {"odpis": {
-        "naglowekA": {"numerKRS": "0000123456", "rejestr": "P",
+        "naglowekA": {"numerKRS": "0000123456", "rejestr": "RejP",
                       "dataRejestracjiWKRS": "27.10.2026", "dataOstatniegoWpisu": "27.10.2026"},
         "dane": {
             "dzial1": {"danePodmiotu": {"nazwa": "TEST ODPADY SP. Z O.O.",
@@ -75,20 +75,106 @@ def test_warsaw_midnight_changes_yesterday():
 
 
 class Response:
-    def __init__(self, payload=None, content=b"", fail=False):
+    def __init__(self, payload=None, content=b"", fail=False, status_code=200, invalid_json=False):
         self.payload, self.content, self.fail = payload, content, fail
+        self.status_code, self.invalid_json = status_code, invalid_json
     def json(self):
+        if self.invalid_json:
+            raise requests.exceptions.JSONDecodeError("invalid body", "", 0)
         return self.payload
     def raise_for_status(self):
-        if self.fail:
-            raise requests.HTTPError("fixture HTTP error")
+        if self.fail or self.status_code >= 400:
+            raise requests.HTTPError("fixture HTTP error", response=self)
 
 
 class Client:
     def __init__(self, responses):
         self.responses = iter(responses)
+        self.calls = []
     def get(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         return next(self.responses)
+
+
+@pytest.mark.parametrize("registry", ["P", "RejP"])
+def test_real_registry_names_do_not_drop_matching_entrepreneurs(extract, registry):
+    extract["odpis"]["naglowekA"]["rejestr"] = registry
+    assert company_from_extract(extract, "0000123456", TARGET, ("38.11.Z",))
+
+
+def test_broad_unrelated_codes_do_not_break_exact_matching(extract):
+    entries = extract["odpis"]["dane"]["dzial3"]["przedmiotDzialalnosci"]
+    entries["przedmiotPrzewazajacejDzialalnosci"] = [
+        {"kodDzial": "33", "opis": "Cały dział"},
+        {"kodDzial": "93", "kodKlasa": "1", "opis": "Cała grupa"}]
+    assert company_from_extract(extract, "0000123456", TARGET, ("38.11.Z",))
+    assert company_from_extract(extract, "0000123456", TARGET, ("33.14.Z",)) is None
+    assert company_from_extract(extract, "0000123456", TARGET, ("20.16.Z",)) is None
+    assert company_from_extract(extract, "0000123456", TARGET, ("93.11.Z",)) is None
+
+
+def test_association_is_checked_in_its_own_register(extract, monkeypatch):
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    extract["odpis"]["naglowekA"]["rejestr"] = "RejS"
+    client = Client([Response(["123456"]), Response(status_code=404), Response(extract)])
+    report = collect(TARGET, client=client)
+    assert report.complete
+    assert report.companies == []
+    assert client.calls[1][1]["params"]["rejestr"] == "P"
+    assert client.calls[2][1]["params"]["rejestr"] == "S"
+
+
+def test_no_current_extract_uses_history_to_exclude_old_company(monkeypatch):
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    full = {"odpis": {"naglowekP": {"rejestr": "RejP", "numerKRS": "0000123456", "wpis": [
+        {"numerWpisu": 2, "dataWpisu": "27.10.2026"},
+        {"numerWpisu": 1, "dataWpisu": "11.04.2001"}]}}}
+    client = Client([Response(["123456"]), Response(status_code=204), Response(full)])
+    report = collect(TARGET, client=client)
+    assert report.complete
+    assert not report.companies
+    assert "OdpisPelny" in client.calls[-1][0][0]
+
+
+def test_new_company_without_current_pkd_is_not_silently_excluded(monkeypatch):
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    full = {"odpis": {"naglowekP": {"rejestr": "RejP", "numerKRS": "0000123456", "wpis": [
+        {"numerWpisu": 1, "dataWpisu": "27.10.2026"}]}}}
+    report = collect(TARGET, client=Client([
+        Response(["123456"]), Response(status_code=204), Response(full)]))
+    assert not report.complete
+    assert not report.companies
+    assert report.checked == 0
+    assert "Nie można potwierdzić" in report.errors[0]
+
+
+def test_bad_json_is_retried_without_claiming_network_is_blocked(extract, monkeypatch):
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    client = Client([Response(invalid_json=True), Response(extract)])
+    assert json_get(client, "https://example.invalid") == extract
+    assert len(client.calls) == 2
+    client = Client([Response(invalid_json=True)] * 3)
+    with pytest.raises(DataError, match="trzykrotnie"):
+        json_get(client, "https://example.invalid")
+
+
+def test_forbidden_response_does_not_fall_back_to_another_register():
+    client = Client([Response(status_code=403)])
+    with pytest.raises(DataError, match="403"):
+        current_extract(client, "0000123456", TARGET)
+    assert len(client.calls) == 1
+
+
+def test_contact_search_failure_does_not_make_registry_results_incomplete(extract, monkeypatch):
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    def fail_contact(*args):
+        raise DataError("Search unavailable")
+    report = collect(TARGET, prefixes=("38.11.Z",), enrich=fail_contact,
+                     client=Client([Response(["123456"]), Response(extract)]))
+    assert report.complete
+    assert len(report.companies) == 1
+    assert len(report.contact_errors) == 1
+    assert not report.errors
 
 
 def test_partial_fetch_is_marked_incomplete(extract, monkeypatch):
@@ -98,6 +184,30 @@ def test_partial_fetch_is_marked_incomplete(extract, monkeypatch):
     assert len(report.companies) == 1
     assert report.checked == 1 and report.candidates == 2
     assert not report.complete
+    assert len(report.errors) == 1
+
+
+def test_only_confirmed_pkd_matches_enter_results(extract, monkeypatch):
+    from copy import deepcopy
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    other = deepcopy(extract)
+    other["odpis"]["naglowekA"]["numerKRS"] = "0000123457"
+    business = other["odpis"]["dane"]["dzial3"]["przedmiotDzialalnosci"]
+    business["przedmiotPozostalejDzialalnosci"] = [{"kodDzial": "38", "opis": "Cały dział"}]
+    report = collect(TARGET, prefixes=("38.11.Z",), client=Client([
+        Response(["123456", "123457"]), Response(extract), Response(other)]))
+    assert report.complete
+    assert report.checked == 2
+    assert [company.krs for company in report.companies] == ["0000123456"]
+
+
+def test_missing_in_both_registers_remains_unresolved(monkeypatch):
+    monkeypatch.setattr("core.time.sleep", lambda _: None)
+    report = collect(TARGET, client=Client([
+        Response(["123456"]), Response(status_code=404), Response(status_code=404)]))
+    assert not report.complete
+    assert report.checked == 0
+    assert not report.companies
     assert len(report.errors) == 1
 
 
@@ -224,3 +334,41 @@ def test_demo_query_parameter_does_not_generate_fictional_results():
     assert not app.exception
     assert not app.dataframe
     assert "report" not in app.session_state
+
+
+def test_changed_pkd_or_date_hides_previous_report(extract):
+    from streamlit.testing.v1 import AppTest
+    from core import yesterday
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py")
+    app.session_state["selected_pkd"] = ["38.11.Z"]
+    report = Report(yesterday().isoformat(), "2026-10-29", ["38.11.Z"], False,
+                    candidates=1, checked=1,
+                    companies=[company_from_extract(extract, "0000123456", TARGET)])
+    app.session_state["report"] = report
+    app.run()
+    assert len(app.dataframe) == 1
+    app.checkbox(key="pkd_option_27.20.Z").check().run()
+    assert not app.dataframe
+    assert not app.get("download_button")
+    assert "report" not in app.session_state
+    app.session_state["report"] = report
+    app.checkbox(key="pkd_option_27.20.Z").uncheck().run()
+    assert len(app.dataframe) == 1
+    app.sidebar.date_input[0].set_value(TARGET).run()
+    assert not app.dataframe
+    assert "report" not in app.session_state
+
+
+def test_unverified_numbers_are_not_displayed_as_a_company_list():
+    from streamlit.testing.v1 import AppTest
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py")
+    app.session_state["selected_pkd"] = ["38.11.Z"]
+    app.session_state["report"] = Report(
+        yesterday().isoformat(), "2026-10-29", ["38.11.Z"], False, candidates=1,
+        errors=["KRS 0000002664: technical detail"])
+    app.run()
+    assert not app.exception
+    assert not app.dataframe
+    assert not app.get("download_button")
+    assert not any("0000002664" in text.value for text in app.markdown)
+    assert any("część danych jest" in warning.value for warning in app.warning)
