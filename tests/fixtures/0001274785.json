@@ -1,0 +1,20 @@
+{
+  "odpis": {
+    "naglowekA": {
+      "rejestr": "RejS",
+      "numerKRS": "0001274785",
+      "dataRejestracjiWKRS": "28.10.2026",
+      "dataOstatniegoWpisu": "29.10.2026"
+    },
+    "dane": {
+      "dzial1": {
+        "danePodmiotu": {
+          "nazwa": "KRAKOWSKIE TOWARZYSTWO - ORDERU ŚWIĘTEGO STANISŁAWA BISKUPA MĘCZENNIKA"
+        }
+      },
+      "dzial3": {
+        "przedmiotDzialalnosci": {}
+      }
+    }
+  }
+}

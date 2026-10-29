@@ -1,0 +1,67 @@
+{
+  "odpis": {
+    "naglowekA": {
+      "rejestr": "RejP",
+      "numerKRS": "0001275317",
+      "dataRejestracjiWKRS": "28.10.2026",
+      "dataOstatniegoWpisu": "29.10.2026"
+    },
+    "dane": {
+      "dzial1": {
+        "danePodmiotuZagranicznego": {
+          "nazwa": "ISARION LTD SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ ODDZIAŁ W POLSCE"
+        }
+      },
+      "dzial3": {
+        "przedmiotDzialalnosci": {
+          "przedmiotPrzewazajacejDzialalnosci": [
+            {
+              "opis": "NAPRAWA I KONSERWACJA CYWILNYCH STATKÓW I ŁODZI",
+              "kodDzial": "33",
+              "kodKlasa": "15",
+              "kodPodklasa": "Z"
+            }
+          ],
+          "przedmiotPozostalejDzialalnosci": [
+            {
+              "opis": "PRODUKCJA CYWILNYCH STATKÓW I KONSTRUKCJI PŁYWAJĄCYCH",
+              "kodDzial": "30",
+              "kodKlasa": "11",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "WYKONYWANIE INSTALACJI ELEKTRYCZNYCH",
+              "kodDzial": "43",
+              "kodKlasa": "21",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "WYKONYWANIE INSTALACJI WODNO-KANALIZACYJNYCH, CIEPLNYCH I KLIMATYZACYJNYCH",
+              "kodDzial": "43",
+              "kodKlasa": "22",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "PRODUKCJA KONSTRUKCJI METALOWYCH I ICH CZĘŚCI",
+              "kodDzial": "25",
+              "kodKlasa": "11",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "ROBOTY ZWIĄZANE Z BUDOWĄ RUROCIĄGÓW PRZESYŁOWYCH I SIECI ROZDZIELCZYCH",
+              "kodDzial": "42",
+              "kodKlasa": "21",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "POZOSTAŁE SPECJALISTYCZNE ROBOTY BUDOWLANE, GDZIE INDZIEJ NIESKLASYFIKOWANE",
+              "kodDzial": "43",
+              "kodKlasa": "99",
+              "kodPodklasa": "Z"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

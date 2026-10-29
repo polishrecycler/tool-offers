@@ -1,0 +1,85 @@
+{
+  "odpis": {
+    "naglowekA": {
+      "rejestr": "RejP",
+      "numerKRS": "0001275848",
+      "dataRejestracjiWKRS": "28.10.2026",
+      "dataOstatniegoWpisu": "29.10.2026"
+    },
+    "dane": {
+      "dzial1": {
+        "danePodmiotu": {
+          "nazwa": "CARGORIA SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ"
+        }
+      },
+      "dzial3": {
+        "przedmiotDzialalnosci": {
+          "przedmiotPrzewazajacejDzialalnosci": [
+            {
+              "opis": "POŚREDNICTWO W SPRZEDAŻY DETALICZNEJ WYSPECJALIZOWANEJ",
+              "kodDzial": "47",
+              "kodKlasa": "92",
+              "kodPodklasa": "Z"
+            }
+          ],
+          "przedmiotPozostalejDzialalnosci": [
+            {
+              "opis": "DZIAŁALNOŚĆ AGENTÓW ZAJMUJĄCYCH SIĘ SPRZEDAŻĄ HURTOWĄ WYSPECJALIZOWANĄ POZOSTAŁYCH TOWARÓW",
+              "kodDzial": "46",
+              "kodKlasa": "18",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "SPRZEDAŻ HURTOWA POJAZDÓW SILNIKOWYCH, Z WYŁĄCZENIEM MOTOCYKLI",
+              "kodDzial": "46",
+              "kodKlasa": "71",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "SPRZEDAŻ HURTOWA CZĘŚCI I AKCESORIÓW DO POJAZDÓW SILNIKOWYCH, Z WYŁĄCZENIEM MOTOCYKLI",
+              "kodDzial": "46",
+              "kodKlasa": "72",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "SPRZEDAŻ DETALICZNA POJAZDÓW SILNIKOWYCH, Z WYŁĄCZENIEM MOTOCYKLI",
+              "kodDzial": "47",
+              "kodKlasa": "81",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "SPRZEDAŻ DETALICZNA CZĘŚCI I AKCESORIÓW DO POJAZDÓW SILNIKOWYCH, Z WYŁĄCZENIEM MOTOCYKLI",
+              "kodDzial": "47",
+              "kodKlasa": "82",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "POZOSTAŁA DZIAŁALNOŚĆ USŁUGOWA WSPOMAGAJĄCA TRANSPORT",
+              "kodDzial": "52",
+              "kodKlasa": "26",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "WYNAJEM I DZIERŻAWA SAMOCHODÓW OSOBOWYCH I LEKKICH POJAZDÓW SILNIKOWYCH, W TYM MOTOCYKLI",
+              "kodDzial": "77",
+              "kodKlasa": "11",
+              "kodPodklasa": "Z"
+            },
+            {
+              "opis": "NAPRAWA MECHANICZNA I SERWISOWA POJAZDÓW SILNIKOWYCH, Z WYŁĄCZENIEM MOTOCYKLI",
+              "kodDzial": "95",
+              "kodKlasa": "31",
+              "kodPodklasa": "A"
+            },
+            {
+              "opis": "NAPRAWA BLACHARSKO-LAKIERNICZA ORAZ KONSERWACJA POJAZDÓW SILNIKOWYCH, Z WYŁĄCZENIEM MOTOCYKLI",
+              "kodDzial": "95",
+              "kodKlasa": "31",
+              "kodPodklasa": "B"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

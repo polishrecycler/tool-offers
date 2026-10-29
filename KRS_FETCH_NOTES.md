@@ -167,3 +167,26 @@ problem czasu oczekiwania, stan filtrów i wyświetlenie wyników w interfejsie.
 Nowa kontrola na świeżej odpowiedzi dla 0001272047 potwierdziła odpowiedź
 200, typ application/json, datę 09.10.2026, kod 43.99.Z i decyzję included.
 Nie sprawdzano witryny online, zgodnie z instrukcją użytkownika.
+
+## Wersja 2026-10-29.7 — kolejność i czas pełnego raportu
+
+Przyczyną utrzymującego się zera podczas długiego pobierania była kolejność.
+Numery z biuletynu były sprawdzane rosnąco, chociaż nowe rejestracje skupiają
+się przy najwyższych numerach KRS. Dla 28.10.2026 pierwszy z 267 nowych
+podmiotów znajdował się dopiero na pozycji 2691 z 3200. Dla 09.10.2026
+przykładowa spółka 0001272047 była na pozycji 3301 z 3358. Dodatkowe stałe
+opóźnienie 0,2 sekundy na numer oznaczało ponad 11 minut oczekiwania jeszcze
+przed doliczeniem czasu odpowiedzi serwera. Przerwanie albo błędy pod koniec
+przebiegu dotykały więc właśnie nowych wpisów.
+
+Numery są teraz sprawdzane od najwyższego, a odpisy pobierają trzy ograniczone
+wątki z istniejącym ponawianiem błędów przejściowych. Usunięto stałe opóźnienie.
+Na świeżych publicznych odpowiedziach dla pełnego dnia 28.10.2026 pierwsze
+100 sprawdzeń dało 100 wyników, po 600 był komplet 267, a cały przebieg
+zakończył się po około 255 sekundach: 3200 rozpatrzonych, 267 wyników
+(245 przedsiębiorców i 22 stowarzyszenia), 0 błędów.
+
+Dodano test kolejności i zachowania znalezionego wyniku przy późniejszym
+błędzie oraz test równoległej ścieżki dla przedsiębiorcy, stowarzyszenia
+i oddziału zagranicznego. Usunięto z interfejsu niezamówioną sekcję kontroli
+pojedynczego numeru.

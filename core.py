@@ -1,11 +1,13 @@
 """KRS report pipeline. No network work happens at import time."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 import re
+import threading
 import time
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -18,7 +20,8 @@ from pkd_catalog import PKD_OPTIONS
 WARSAW = ZoneInfo("Europe/Warsaw")
 API = "https://api-krs.ms.gov.pl/api/krs"
 DEFAULT_PKD = ("37", "38", "39")
-PARSER_VERSION = "2026-10-29.6"
+PARSER_VERSION = "2026-10-29.7"
+KRS_WORKERS = 3
 ALL_PKD_FILTERS = frozenset(re.sub(r"[^0-9A-Z]", "", code) for code in PKD_OPTIONS)
 
 
@@ -360,12 +363,15 @@ def diagnostics_bytes(report):
                       ensure_ascii=False, indent=2).encode("utf-8")
 
 
-def inspect_number(number, target, prefixes, client=None):
-    number = krs_number(number)
-    report = Report(target.isoformat(), datetime.now(WARSAW).isoformat(), list(prefixes), False,
-                    candidates=1, source_kind="single_number")
-    verify_number(client or session(), report, number, target, prefixes)
-    return report
+def merge_partial_report(report: Report, partial: Report) -> None:
+    """Merge one independently verified number into the daily report."""
+    report.checked += partial.checked
+    report.companies.extend(partial.companies)
+    report.errors.extend(partial.errors)
+    report.contact_errors.extend(partial.contact_errors)
+    report.audit.extend(partial.audit)
+    for reason, count in partial.qualification.items():
+        report.qualification[reason] = report.qualification.get(reason, 0) + count
 
 
 def collect(target: date, prefixes=DEFAULT_PKD, main_only=False,
@@ -373,20 +379,49 @@ def collect(target: date, prefixes=DEFAULT_PKD, main_only=False,
             client=None) -> Report:
     if target >= datetime.now(WARSAW).date():
         raise DataError("Wybierz zakończony dzień — najpóźniej wczoraj.")
+    supplied_client = client is not None
     client = client or session()
     report = Report(target.isoformat(), datetime.now(WARSAW).isoformat(), list(prefixes), main_only)
     # Full daily bulletin; repeated changes to the same company are deduplicated.
     if progress:
         progress(0, 0, "Pobieranie dziennego biuletynu KRS")
     payload = json_get(AuditedClient(client, report.source_requests), f"{API}/Biuletyn/{target.isoformat()}")
-    numbers = bulletin_numbers(payload)
+    # New numbers are allocated increasingly and new registrations in a daily
+    # bulletin are concentrated at its high end. Check that end first so an
+    # interrupted report does not misleadingly stay at zero until the end.
+    numbers = sorted(bulletin_numbers(payload), reverse=True)
     report.candidates = len(numbers)
-    for index, number in enumerate(sorted(numbers), 1):
-        verify_number(client, report, number, target, prefixes, main_only, enrich)
-        if progress:
-            progress(index, report.candidates,
-                     f"Sprawdzanie rejestru — potwierdzone firmy zgodne z kodami: {len(report.companies)}")
-        time.sleep(0.2)
+    if supplied_client:
+        # Explicit clients are used by deterministic tests and offline replays;
+        # they may be response iterators and cannot be shared between threads.
+        for index, number in enumerate(numbers, 1):
+            verify_number(client, report, number, target, prefixes, main_only, enrich)
+            if progress:
+                progress(index, report.candidates,
+                         f"Sprawdzanie rejestru — potwierdzone podmioty: {len(report.companies)}")
+        report.companies.sort(key=lambda company: company.krs)
+        return report
+
+    thread_state = threading.local()
+
+    def check(number):
+        if not hasattr(thread_state, "client"):
+            thread_state.client = session()
+        partial = Report(target.isoformat(), report.generated_at, list(prefixes), main_only,
+                         candidates=1)
+        verify_number(thread_state.client, partial, number, target, prefixes, main_only, enrich)
+        return partial
+
+    # Three workers substantially shorten full-day scans while keeping the
+    # load on the public registry deliberately bounded.
+    with ThreadPoolExecutor(max_workers=KRS_WORKERS) as pool:
+        futures = [pool.submit(check, number) for number in numbers]
+        for index, future in enumerate(as_completed(futures), 1):
+            merge_partial_report(report, future.result())
+            if progress:
+                progress(index, report.candidates,
+                         f"Sprawdzanie rejestru — potwierdzone podmioty: {len(report.companies)}")
+    report.companies.sort(key=lambda company: company.krs)
     return report
 
 

@@ -182,7 +182,7 @@ def test_contact_search_failure_does_not_make_registry_results_incomplete(extrac
 def test_partial_fetch_is_marked_incomplete(extract, monkeypatch):
     monkeypatch.setattr("core.time.sleep", lambda _: None)
     report = collect(TARGET, client=Client([
-        Response(["123456", "123457"]), Response(extract), Response(fail=True)]))
+        Response(["123456", "123457"]), Response(fail=True), Response(extract)]))
     assert len(report.companies) == 1
     assert report.checked == 1 and report.candidates == 2
     assert not report.complete
@@ -197,7 +197,7 @@ def test_only_confirmed_pkd_matches_enter_results(extract, monkeypatch):
     business = other["odpis"]["dane"]["dzial3"]["przedmiotDzialalnosci"]
     business["przedmiotPozostalejDzialalnosci"] = [{"kodDzial": "38", "opis": "Cały dział"}]
     report = collect(TARGET, prefixes=("38.11.Z",), client=Client([
-        Response(["123456", "123457"]), Response(extract), Response(other)]))
+        Response(["123456", "123457"]), Response(other), Response(extract)]))
     assert report.complete
     assert report.checked == 2
     assert [company.krs for company in report.companies] == ["0000123456"]
@@ -477,7 +477,7 @@ def test_all_codes_never_turn_updates_of_old_companies_into_new_registrations(ex
     association = deepcopy(extract)
     association["odpis"]["naglowekA"].update(numerKRS="0000123457", rejestr="RejS", dataRejestracjiWKRS="11.04.2001")
     report = collect(TARGET, tuple(PKD_OPTIONS), client=Client([
-        Response(["123456", "123457"]), Response(old), Response(status_code=404), Response(association)]))
+        Response(["123456", "123457"]), Response(status_code=404), Response(association), Response(old)]))
     assert report.complete
     assert not report.companies
     assert report.qualification == {"other_registration_date": 2}
@@ -559,7 +559,7 @@ core.PARSER_VERSION = "old-version"
 core.company_from_extract = lambda *a, **k: None
 app = AppTest.from_file("app.py").run()
 assert not app.exception
-assert core.PARSER_VERSION == "2026-10-29.6"
+assert core.PARSER_VERSION == "2026-10-29.7"
 assert core.company_from_extract.__name__ == "company_from_extract"
 '''
     subprocess.run([sys.executable, "-c", code], check=True,
@@ -600,11 +600,12 @@ def test_real_bh_company_through_select_all_confirmation_and_report(monkeypatch)
 @pytest.mark.parametrize("raw_date", ["09.10.2026", "2026-10-09", "09-10-2026"])
 def test_date_formats_and_audit_keep_real_company_decision(raw_date):
     import json
-    from core import inspect_number, diagnostics_bytes
+    from core import diagnostics_bytes
     from pkd_catalog import PKD_OPTIONS
     payload = json.loads((Path(__file__).parent / "fixtures" / "bh_development_0001272047.json").read_text())
     payload["odpis"]["naglowekA"]["dataRejestracjiWKRS"] = raw_date
-    report = inspect_number("1272047", date(2026,10,9), tuple(PKD_OPTIONS), client=Client([Response(payload)]))
+    report = collect(date(2026,10,9), tuple(PKD_OPTIONS),
+                     client=Client([Response(["1272047"]), Response(payload)]))
     d = json.loads(diagnostics_bytes(report))
     assert report.complete and len(report.companies) == 1
     assert d["all_industries"] and len(d["applied_pkd"]) == 728
@@ -615,8 +616,8 @@ def test_date_formats_and_audit_keep_real_company_decision(raw_date):
 
 @pytest.mark.parametrize("payload", [{}, {"odpis": []}, {"odpis": {"naglowekA": {}}}])
 def test_unexpected_response_shapes_are_unverified_not_successful_zero(payload):
-    from core import inspect_number
-    report = inspect_number("123456", TARGET, ("38.11.Z",), client=Client([Response(payload)]))
+    report = collect(TARGET, ("38.11.Z",),
+                     client=Client([Response(["123456"]), Response(payload)]))
     assert not report.complete
     assert report.checked == 0
     assert report.audit[0]["decision"] == "unverified"
@@ -624,41 +625,82 @@ def test_unexpected_response_shapes_are_unverified_not_successful_zero(payload):
 
 
 def test_transport_failure_is_recorded_without_a_false_no_matches_result():
-    from core import inspect_number
     class TimeoutClient:
+        calls = 0
         def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return Response(["123456"])
             raise requests.Timeout()
-    report = inspect_number("123456", TARGET, ("38.11.Z",), client=TimeoutClient())
+    report = collect(TARGET, ("38.11.Z",), client=TimeoutClient())
     assert not report.complete
     assert report.audit[0]["decision"] == "unverified"
     assert report.audit[0]["requests"][0]["connection_error"] == "Timeout"
 
 
-def test_single_number_control_uses_same_parser_and_settings(monkeypatch):
-    import json
+def test_unrequested_single_number_control_is_absent():
     from streamlit.testing.v1 import AppTest
-    from pkd_catalog import PKD_OPTIONS
-    payload = json.loads((Path(__file__).parent / "fixtures" / "bh_development_0001272047.json").read_text())
-    client = Client([Response(payload)])
-    monkeypatch.setattr("core.session", lambda: client)
-    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py")
-    app.session_state["selected_pkd"] = list(PKD_OPTIONS)
-    app.run()
-    app.sidebar.date_input[0].set_value(date(2026,10,9))
-    app.text_input(key="inspect_krs").set_value("0001272047").run()
-    app.button(key="inspect_krs_run").click().run()
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
     assert not app.exception
-    assert app.session_state["inspection"].companies[0].krs == "0001272047"
-    assert len(app.dataframe[0].value) == 1
-    assert len(client.calls) == 1
-    assert app.get("download_button")[0].key == "inspection_diagnostics"
+    assert not any(e.label == "Sprawdź pojedynczy numer w rejestrze" for e in app.expander)
+    assert not any(w.key == "inspect_krs" for w in app.text_input)
 
 
 def test_silent_parser_drop_cannot_be_reported_as_complete_zero(extract, monkeypatch):
-    from core import inspect_number
     monkeypatch.setattr("core.company_from_extract", lambda *args, **kwargs: None)
-    report = inspect_number("123456", TARGET, ("38.11.Z",), client=Client([Response(extract)]))
+    report = collect(TARGET, ("38.11.Z",),
+                     client=Client([Response(["123456"]), Response(extract)]))
     assert not report.complete
     assert report.checked == 0
     assert report.audit[0]["decision"] == "unverified"
     assert "bez ustalonej przyczyny" in report.errors[0]
+
+
+def test_newest_numbers_are_checked_first_and_survive_later_failure(extract):
+    from copy import deepcopy
+    newer = deepcopy(extract)
+    newer["odpis"]["naglowekA"]["numerKRS"] = "0000123457"
+    progress = []
+    client = Client([
+        Response(["123456", "123457"]),
+        Response(newer),
+        Response(fail=True),
+    ])
+    report = collect(TARGET, ("38.11.Z",), client=client,
+                     progress=lambda done, total, message: progress.append((done, total, message)))
+    assert [call[0][0].rsplit("/", 1)[-1] for call in client.calls[1:]] == [
+        "0000123457", "0000123456"]
+    assert "potwierdzone podmioty: 1" in progress[1][2]
+    assert [company.krs for company in report.companies] == ["0000123457"]
+    assert not report.complete
+    assert report.checked == 1 and report.candidates == 2
+
+
+def test_parallel_daily_path_includes_entrepreneur_association_and_foreign_branch(monkeypatch):
+    import json
+    from copy import deepcopy
+    from pkd_catalog import PKD_OPTIONS
+
+    fixtures = {}
+    for number in ("0001275848", "0001274785", "0001275317"):
+        fixtures[number] = json.loads(
+            (Path(__file__).parent / "fixtures" / f"{number}.json").read_text())
+
+    class RoutingClient:
+        def get(self, url, params=None, **kwargs):
+            if "/Biuletyn/" in url:
+                return Response([number.lstrip("0") for number in fixtures])
+            number = url.rsplit("/", 1)[-1]
+            payload = deepcopy(fixtures[number])
+            actual_registry = payload["odpis"]["naglowekA"]["rejestr"]
+            if params["rejestr"] == "P" and actual_registry == "RejS":
+                return Response(status_code=404)
+            return Response(payload)
+
+    monkeypatch.setattr("core.session", RoutingClient)
+    report = collect(date(2026, 10, 28), tuple(PKD_OPTIONS))
+    assert report.complete
+    assert report.checked == report.candidates == 3
+    assert {company.krs for company in report.companies} == set(fixtures)
+    assert {company.registry for company in report.companies} == {"P", "S"}
+    assert report.qualification == {"new_registrations": 3, "new_associations": 1}
