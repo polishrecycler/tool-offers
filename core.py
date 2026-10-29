@@ -18,7 +18,7 @@ from pkd_catalog import PKD_OPTIONS
 WARSAW = ZoneInfo("Europe/Warsaw")
 API = "https://api-krs.ms.gov.pl/api/krs"
 DEFAULT_PKD = ("37", "38", "39")
-PARSER_VERSION = "2026-10-29.5"
+PARSER_VERSION = "2026-10-29.6"
 ALL_PKD_FILTERS = frozenset(re.sub(r"[^0-9A-Z]", "", code) for code in PKD_OPTIONS)
 
 
@@ -274,10 +274,98 @@ class Report:
     contact_errors: list[str] = field(default_factory=list)
     qualification: dict[str, int] = field(default_factory=dict)
     parser_version: str = PARSER_VERSION
+    audit: list[dict] = field(default_factory=list)
+    source_kind: str = "daily_bulletin"
+    source_requests: list[dict] = field(default_factory=list)
 
     @property
     def complete(self):
         return self.checked == self.candidates and not self.errors and not self.demo
+
+
+class AuditedClient:
+    """Record only public request metadata; never headers or credentials."""
+    def __init__(self, client, requests_log):
+        self.client, self.requests_log = client, requests_log
+
+    def get(self, url, **kwargs):
+        record = {"url": url, "register": (kwargs.get("params") or {}).get("rejestr")}
+        try:
+            response = self.client.get(url, **kwargs)
+            record.update(status=getattr(response, "status_code", None),
+                          content_type=getattr(response, "headers", {}).get("Content-Type"),
+                          bytes=len(getattr(response, "content", b"")))
+            return response
+        except requests.RequestException as exc:
+            record["connection_error"] = type(exc).__name__
+            raise
+        finally:
+            self.requests_log.append(record)
+
+
+def verify_number(client, report, number, target, prefixes, main_only=False, enrich=None):
+    record = {"krs": number, "requests": [], "target_date": target.isoformat()}
+    before = report.qualification.copy()
+    try:
+        payload = current_extract(AuditedClient(client, record["requests"]), number, target, report.qualification)
+        if isinstance(payload, dict):
+            header = payload.get("odpis", {}).get("naglowekA", {})
+            record["registration_date_raw"] = header.get("dataRejestracjiWKRS")
+            record["last_entry_date_raw"] = header.get("dataOstatniegoWpisu")
+            record["register_raw"] = header.get("rejestr")
+            business = payload.get("odpis", {}).get("dane", {}).get("dzial3", {}).get("przedmiotDzialalnosci", {}) or {}
+            record["pkd_raw"] = [
+                {key: entry.get(key) for key in ("kodDzial", "kodKlasa", "kodPodklasa")}
+                for entry in (business.get("przedmiotPrzewazajacejDzialalnosci", []) or [])
+                + (business.get("przedmiotPozostalejDzialalnosci", []) or []) if isinstance(entry, dict)]
+        company = company_from_extract(payload, number, target, prefixes, main_only,
+                                       report.qualification) if payload is not None else None
+        changes = {key: value - before.get(key, 0) for key, value in report.qualification.items()
+                   if value != before.get(key, 0)}
+        record["qualification"] = changes
+        if company:
+            record["decision"] = "included"
+            if enrich:
+                try:
+                    enrich(company, client)
+                except Exception:
+                    company.contact_status = "Błąd wyszukiwania — sprawdź ręcznie"
+                    report.contact_errors.append(f"KRS {number}: nie udało się wyszukać kontaktów.")
+            report.companies.append(company)
+        elif changes.get("other_registration_date"):
+            record["decision"] = "different_registration_date"
+        elif changes.get("other_pkd"):
+            record["decision"] = "pkd_not_matched"
+        else:
+            raise DataError("Podmiot pominięto bez ustalonej przyczyny. Wymaga sprawdzenia danych kontroli.")
+        report.checked += 1
+    except DataError as exc:
+        record.update(decision="unverified", error=str(exc))
+        report.errors.append(f"KRS {number}: {exc}")
+    except (KeyError, TypeError, AttributeError) as exc:
+        record.update(decision="unverified", error="Nieznana struktura odpowiedzi: " + type(exc).__name__)
+        report.errors.append(f"KRS {number}: {record['error']}")
+    finally:
+        report.audit.append(record)
+
+
+def diagnostics_bytes(report):
+    return json.dumps({"parser_version": report.parser_version, "source": report.source_kind,
+                       "target_date": report.target_date, "applied_pkd": report.filters,
+                       "source_requests": report.source_requests,
+                       "all_industries": ALL_PKD_FILTERS.issubset(normalize_pkd(p) for p in report.filters),
+                       "candidates": report.candidates, "checked": report.checked,
+                       "matched": len(report.companies), "qualification": report.qualification,
+                       "errors": report.errors, "decisions": report.audit},
+                      ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def inspect_number(number, target, prefixes, client=None):
+    number = krs_number(number)
+    report = Report(target.isoformat(), datetime.now(WARSAW).isoformat(), list(prefixes), False,
+                    candidates=1, source_kind="single_number")
+    verify_number(client or session(), report, number, target, prefixes)
+    return report
 
 
 def collect(target: date, prefixes=DEFAULT_PKD, main_only=False,
@@ -290,25 +378,11 @@ def collect(target: date, prefixes=DEFAULT_PKD, main_only=False,
     # Full daily bulletin; repeated changes to the same company are deduplicated.
     if progress:
         progress(0, 0, "Pobieranie dziennego biuletynu KRS")
-    payload = json_get(client, f"{API}/Biuletyn/{target.isoformat()}")
+    payload = json_get(AuditedClient(client, report.source_requests), f"{API}/Biuletyn/{target.isoformat()}")
     numbers = bulletin_numbers(payload)
     report.candidates = len(numbers)
     for index, number in enumerate(sorted(numbers), 1):
-        try:
-            payload = current_extract(client, number, target, report.qualification)
-            company = company_from_extract(payload, number, target, prefixes, main_only,
-                                           report.qualification) if payload is not None else None
-            report.checked += 1
-            if company:
-                if enrich:
-                    try:
-                        enrich(company, client)
-                    except Exception:
-                        company.contact_status = "Błąd wyszukiwania — sprawdź ręcznie"
-                        report.contact_errors.append(f"KRS {number}: nie udało się wyszukać kontaktów.")
-                report.companies.append(company)
-        except DataError as exc:
-            report.errors.append(f"KRS {number}: {exc}")
+        verify_number(client, report, number, target, prefixes, main_only, enrich)
         if progress:
             progress(index, report.candidates,
                      f"Sprawdzanie rejestru — potwierdzone firmy zgodne z kodami: {len(report.companies)}")

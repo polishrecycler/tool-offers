@@ -134,3 +134,36 @@ Teraz wymaga zatwierdzenia lub odrzucenia roboczych zmian. Pasek pobierania
 pokazuje datę i liczbę zatwierdzonych kodów. Podniesiono wersję odczytu,
 aby nie korzystać z poprzednich wyników sesji. Nie potwierdzono bezpośrednio,
 który stan filtrów spowodował zerowy wynik w sesji użytkownika.
+
+## Wersja 2026-10-29.6 — pełna kontrola ścieżki odczytu
+
+Nie odtworzono zerowego wyniku w środowisku wykonawczym na świeżych
+odpowiedziach dla 0001272047 (09.10.2026), 0001275848 i 0001275317
+(28.10.2026) oraz nowego stowarzyszenia 0001274785 (28.10.2026).
+To nie potwierdza poprawności sesji działającej u użytkownika.
+
+Każdy raport zapisuje teraz `audit`: numer, docelową datę, datę i rejestr
+odczytane z odpowiedzi, surowe składowe kodów działalności, kwalifikację
+oraz końcową decyzję. Przy żądaniach zapisujemy adres publicznego endpointu,
+część rejestru, kod odpowiedzi serwera, typ i długość odpowiedzi lub typ
+problemu połączenia. Nie zapisujemy nagłówków uwierzytelnienia ani danych
+osób z pełnego odpisu. Biuletyn ma osobny zapis żądania.
+
+`verify_number` jest wspólną ścieżką raportu i kontroli pojedynczego numeru.
+Nieuzasadnione pominięcie numeru nie zwiększa licznika sprawdzonych:
+raport pozostaje niepełny i zapisuje błąd zamiast pokazywać kompletny wynik zero.
+Pozostawiono odrębne rozpoznawanie innej daty, innych kodów i braku weryfikacji.
+
+W zwiniętym podsumowaniu można pobrać dane kontroli całego raportu, również
+przy zerowej liczbie dopasowań. Dodatkowa zwinięta sekcja sprawdza pojedynczy
+numer przy tej samej dacie i zatwierdzonych filtrach. Nie korzysta z biuletynu,
+a jedynie z odpisu; jej wynik nie dowodzi obecności numeru w biuletynie.
+Pozwala porównać odpowiedź i decyzję na hoście użytkownika bez pełnego skanu.
+
+Sprawdzono trzy formaty dat, części rejestru P/S, brak aktualnego odpisu,
+pełną historię, różne poziomy kodów, oddziały zagraniczne, brak kodów,
+niepoprawne struktury danych, nieczytelną odpowiedź, odmowę dostępu,
+problem czasu oczekiwania, stan filtrów i wyświetlenie wyników w interfejsie.
+Nowa kontrola na świeżej odpowiedzi dla 0001272047 potwierdziła odpowiedź
+200, typ application/json, datę 09.10.2026, kod 43.99.Z i decyzję included.
+Nie sprawdzano witryny online, zgodnie z instrukcją użytkownika.

@@ -6,11 +6,12 @@ import streamlit as st
 import core
 
 # A source update must not retain an older imported parser in a running host.
-if getattr(core, "PARSER_VERSION", None) != "2026-10-29.5":
+if getattr(core, "PARSER_VERSION", None) != "2026-10-29.6":
     importlib.reload(core)
 
 from contacts import enrich_contacts, search_url
-from core import DataError, PARSER_VERSION, collect, normalize_pkd, save_report, yesterday
+from core import (DataError, PARSER_VERSION, collect, diagnostics_bytes, inspect_number,
+                  normalize_pkd, save_report, yesterday)
 from exports import pdf_bytes, rows, status, xlsx_bytes
 from pkd_picker import pkd_picker
 
@@ -175,5 +176,42 @@ if report:
         reasons = Counter(error.partition(": ")[2] or error for error in report.errors)
         for reason, count in reasons.items():
             st.write(f"{count} przypadków: {reason}")
+        st.download_button("Pobierz dane kontroli raportu", diagnostics_bytes(report),
+                           file_name=f"kontrola-raportu-{report.target_date}.json",
+                           mime="application/json", key="report_diagnostics")
 else:
     st.write("Wybierz datę i branże po lewej, a następnie kliknij **Pobierz firmy z KRS**.")
+
+with st.expander("Sprawdź pojedynczy numer w rejestrze", expanded=False):
+    st.caption("Ta kontrola używa tej samej daty i zatwierdzonych kodów co raport, "
+               "ale pobiera tylko wskazany odpis. Pozwala ustalić dokładną przyczynę pominięcia podmiotu.")
+    check_number = st.text_input("Numer Krajowego Rejestru Sądowego", placeholder="Np. 0001272047",
+                                 max_chars=10, key="inspect_krs", live=True)
+    if st.button("Sprawdź ten numer", disabled=not check_number or not selected_pkd or pending_pkd,
+                 key="inspect_krs_run"):
+        st.session_state.pop("inspection", None)
+        try:
+            inspection = inspect_number(check_number, target, tuple(selected_pkd))
+            st.session_state["inspection"] = inspection
+        except DataError as exc:
+            st.error(str(exc))
+    inspection = st.session_state.get("inspection")
+    if (inspection and inspection.parser_version == PARSER_VERSION
+            and inspection.target_date == target.isoformat() and inspection.filters == list(selected_pkd)):
+        decision = inspection.audit[0]
+        st.write(f"Sprawdzany numer: {decision['krs']}. Data raportu: {inspection.target_date}.")
+        st.write(f"Data pierwszej rejestracji odczytana z dokumentu: "
+                 f"{decision.get('registration_date_raw', 'brak w aktualnym odpisie')}.")
+        if inspection.companies:
+            st.success("Podmiot spełnia ustawione warunki i powinien znaleźć się w raporcie, "
+                       "jeśli jego numer znajduje się w biuletynie tego dnia.")
+            st.dataframe(rows(inspection), hide_index=True, width="stretch")
+        elif decision['decision'] == 'different_registration_date':
+            st.info("Podmiot pominięto z powodu innej daty pierwszej rejestracji.")
+        elif decision['decision'] == 'pkd_not_matched':
+            st.info("Podmiot pominięto z powodu braku zgodności z zatwierdzonymi kodami działalności.")
+        else:
+            st.error("Nie udało się potwierdzić danych podmiotu. Szczegóły są w pliku kontroli.")
+        st.download_button("Pobierz dane kontroli tego numeru", diagnostics_bytes(inspection),
+                           file_name=f"kontrola-{decision['krs']}.json", mime="application/json",
+                           key="inspection_diagnostics")

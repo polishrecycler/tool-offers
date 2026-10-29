@@ -290,7 +290,7 @@ def test_app_selected_subclasses_and_both_downloads(extract, monkeypatch):
     assert fetch.call_args.kwargs["enrich"] is None
     save.assert_called_once()
     assert len(app.dataframe) == 1
-    downloads = app.get("download_button")
+    downloads = [b for b in app.get("download_button") if b.proto.label.startswith("Eksport")]
     assert [button.proto.label for button in downloads] == [
         "Eksport do Excela (.xlsx)", "Eksport do PDF"]
     assert all(button.proto.url for button in downloads)
@@ -380,7 +380,7 @@ def test_unverified_numbers_are_not_displayed_as_a_company_list():
     app.run()
     assert not app.exception
     assert not app.dataframe
-    assert not app.get("download_button")
+    assert [b.key for b in app.get("download_button")] == ["report_diagnostics"]
     assert not any("0000002664" in text.value for text in app.markdown)
     assert any("część danych jest" in warning.value for warning in app.warning)
     assert all(not expander.proto.expanded for expander in app.expander)
@@ -559,7 +559,7 @@ core.PARSER_VERSION = "old-version"
 core.company_from_extract = lambda *a, **k: None
 app = AppTest.from_file("app.py").run()
 assert not app.exception
-assert core.PARSER_VERSION == "2026-10-29.5"
+assert core.PARSER_VERSION == "2026-10-29.6"
 assert core.company_from_extract.__name__ == "company_from_extract"
 '''
     subprocess.run([sys.executable, "-c", code], check=True,
@@ -595,3 +595,70 @@ def test_real_bh_company_through_select_all_confirmation_and_report(monkeypatch)
     assert client.calls[0][0][0].endswith("/Biuletyn/2026-10-09")
     assert company_from_extract(payload, "0001272047", date(2026,10,9), ("43.99.Z",))
     assert company_from_extract(payload, "0001272047", date(2026,10,9), ("38.11.Z",)) is None
+
+
+@pytest.mark.parametrize("raw_date", ["09.10.2026", "2026-10-09", "09-10-2026"])
+def test_date_formats_and_audit_keep_real_company_decision(raw_date):
+    import json
+    from core import inspect_number, diagnostics_bytes
+    from pkd_catalog import PKD_OPTIONS
+    payload = json.loads((Path(__file__).parent / "fixtures" / "bh_development_0001272047.json").read_text())
+    payload["odpis"]["naglowekA"]["dataRejestracjiWKRS"] = raw_date
+    report = inspect_number("1272047", date(2026,10,9), tuple(PKD_OPTIONS), client=Client([Response(payload)]))
+    d = json.loads(diagnostics_bytes(report))
+    assert report.complete and len(report.companies) == 1
+    assert d["all_industries"] and len(d["applied_pkd"]) == 728
+    assert d["decisions"][0]["decision"] == "included"
+    assert d["decisions"][0]["registration_date_raw"] == raw_date
+    assert d["decisions"][0]["requests"][0]["status"] == 200
+
+
+@pytest.mark.parametrize("payload", [{}, {"odpis": []}, {"odpis": {"naglowekA": {}}}])
+def test_unexpected_response_shapes_are_unverified_not_successful_zero(payload):
+    from core import inspect_number
+    report = inspect_number("123456", TARGET, ("38.11.Z",), client=Client([Response(payload)]))
+    assert not report.complete
+    assert report.checked == 0
+    assert report.audit[0]["decision"] == "unverified"
+    assert report.errors
+
+
+def test_transport_failure_is_recorded_without_a_false_no_matches_result():
+    from core import inspect_number
+    class TimeoutClient:
+        def get(self, *args, **kwargs):
+            raise requests.Timeout()
+    report = inspect_number("123456", TARGET, ("38.11.Z",), client=TimeoutClient())
+    assert not report.complete
+    assert report.audit[0]["decision"] == "unverified"
+    assert report.audit[0]["requests"][0]["connection_error"] == "Timeout"
+
+
+def test_single_number_control_uses_same_parser_and_settings(monkeypatch):
+    import json
+    from streamlit.testing.v1 import AppTest
+    from pkd_catalog import PKD_OPTIONS
+    payload = json.loads((Path(__file__).parent / "fixtures" / "bh_development_0001272047.json").read_text())
+    client = Client([Response(payload)])
+    monkeypatch.setattr("core.session", lambda: client)
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py")
+    app.session_state["selected_pkd"] = list(PKD_OPTIONS)
+    app.run()
+    app.sidebar.date_input[0].set_value(date(2026,10,9))
+    app.text_input(key="inspect_krs").set_value("0001272047").run()
+    app.button(key="inspect_krs_run").click().run()
+    assert not app.exception
+    assert app.session_state["inspection"].companies[0].krs == "0001272047"
+    assert len(app.dataframe[0].value) == 1
+    assert len(client.calls) == 1
+    assert app.get("download_button")[0].key == "inspection_diagnostics"
+
+
+def test_silent_parser_drop_cannot_be_reported_as_complete_zero(extract, monkeypatch):
+    from core import inspect_number
+    monkeypatch.setattr("core.company_from_extract", lambda *args, **kwargs: None)
+    report = inspect_number("123456", TARGET, ("38.11.Z",), client=Client([Response(extract)]))
+    assert not report.complete
+    assert report.checked == 0
+    assert report.audit[0]["decision"] == "unverified"
+    assert "bez ustalonej przyczyny" in report.errors[0]
