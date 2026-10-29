@@ -6,7 +6,7 @@ import pytest
 from openpyxl import load_workbook
 import requests
 
-from core import (DataError, bulletin_numbers, collect, company_from_extract,
+from core import (DataError, Report, bulletin_numbers, collect, company_from_extract,
                   pkd_filters, yesterday)
 from contacts import enrich_contacts
 from demo import demo_report
@@ -146,11 +146,60 @@ def test_pdf_generates_with_polish_text_and_long_sources():
     assert len(content) > 10000
 
 
-def test_app_demo_downloads():
+def test_app_selected_subclasses_and_both_downloads(extract, monkeypatch):
     from streamlit.testing.v1 import AppTest
+    from unittest.mock import Mock
+    company = company_from_extract(extract, "0000123456", TARGET)
+    report = Report(TARGET.isoformat(), "2026-10-28T09:00:00+01:00",
+                    ["38.11.Z", "27.20.Z"], False, candidates=1, checked=1, companies=[company])
+    fetch = Mock(return_value=report)
+    save = Mock()
+    monkeypatch.setattr("core.collect", fetch)
+    monkeypatch.setattr("core.save_report", save)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
     assert not app.exception
-    app.sidebar.button[1].click().run()
+    assert len(app.sidebar.checkbox) == 1
+    assert app.sidebar.checkbox[0].label == "Szukaj kontaktów w internecie"
+    assert len(app.sidebar.button) == 1
+    assert not app.sidebar.text_input
+    labels = app.sidebar.multiselect[0].options
+    assert "27.20.Z — Produkcja baterii i akumulatorów" in labels
+    assert "38.21.Z — Odzysk surowców" in labels
+    app.sidebar.date_input[0].set_value(TARGET)
+    app.sidebar.multiselect[0].set_value(["38.11.Z", "27.20.Z"])
+    app.sidebar.checkbox[0].uncheck()
+    app.sidebar.button[0].click().run()
     assert not app.exception
-    assert "report" in app.session_state
-    assert app.session_state["report"].demo
+    assert not app.session_state["report"].demo
+    fetch.assert_called_once()
+    assert fetch.call_args.args == (TARGET, ("38.11.Z", "27.20.Z"))
+    assert fetch.call_args.kwargs["main_only"] is False
+    assert fetch.call_args.kwargs["enrich"] is None
+    save.assert_called_once()
+    assert len(app.dataframe) == 1
+    downloads = app.get("download_button")
+    assert [button.proto.label for button in downloads] == [
+        "Eksport do Excela (.xlsx)", "Eksport do PDF"]
+    assert all(button.proto.url for button in downloads)
+
+
+def test_app_empty_selection_does_not_fetch(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    from unittest.mock import Mock
+    fetch = Mock()
+    monkeypatch.setattr("core.collect", fetch)
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py").run()
+    app.sidebar.multiselect[0].set_value([]).run()
+    assert not app.exception
+    assert app.sidebar.button[0].disabled
+    fetch.assert_not_called()
+
+
+def test_demo_query_parameter_does_not_generate_fictional_results():
+    from streamlit.testing.v1 import AppTest
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "app.py")
+    app.query_params["demo"] = "1"
+    app.run()
+    assert not app.exception
+    assert not app.dataframe
+    assert "report" not in app.session_state

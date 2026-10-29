@@ -3,9 +3,9 @@ from pathlib import Path
 import streamlit as st
 
 from contacts import enrich_contacts, search_url
-from core import DataError, collect, pkd_filters, save_report, yesterday
-from demo import demo_report
+from core import DataError, collect, save_report, yesterday
 from exports import pdf_bytes, rows, status, xlsx_bytes
+from pkd_catalog import DEFAULT_SELECTED_PKD, PKD_OPTIONS, PKD_SOURCE_URL, pkd_label
 
 ROOT = Path(__file__).parent
 st.set_page_config(page_title="Tool Offers — nowe firmy KRS", page_icon="♻️", layout="wide")
@@ -16,32 +16,43 @@ st.write("Znajdź firmy po raz pierwszy zarejestrowane w KRS w wybranym dniu. "
 with st.sidebar:
     st.header("Ustawienia raportu")
     target = st.date_input("Data pierwszej rejestracji w KRS", value=yesterday(), max_value=yesterday())
-    pkd_text = st.text_input("Działy lub kody PKD", "37, 38, 39",
-                             help="37: ścieki; 38: odpady i odzysk; 39: rekultywacja. "
-                                  "Możesz dodać 36 (woda) lub podać pełne kody, np. 38.11.Z. "
-                                  "Działy obejmują kody PKD 2007 i 2025; ich opisy mogą się różnić.")
-    main_only = st.checkbox("Tylko działalność przeważająca", value=False)
+    selected_pkd = st.multiselect(
+        "Branże — kody PKD", options=list(PKD_OPTIONS), default=list(DEFAULT_SELECTED_PKD),
+        format_func=pkd_label, key="selected_pkd", placeholder="Wyszukaj kod lub opis działalności",
+        help="PKD to Polska Klasyfikacja Działalności. Wybierz jeden lub więcej kodów. "
+             "Lista obejmuje odpady, odzysk, recykling, baterie i akumulatory oraz opakowania. "
+             "Wyszukiwanie obejmuje działalność przeważającą i dodatkową.")
+    st.caption("Nazwy kodów pochodzą z Polskiej Klasyfikacji Działalności 2025.")
+    with st.expander("Zakres kodów i źródło opisów"):
+        st.write("Nie ma osobnego kodu wyłącznie dla baterii do samochodów elektrycznych. "
+                 "Niektóre kody obejmują szerszą działalność, np. również inne akumulatory, "
+                 "części samochodowe, wyroby z papieru, szkła i tworzyw sztucznych. "
+                 "Sam kod nie potwierdza specjalizacji firmy.")
+        st.write("Odzysk opakowań obejmują kody gospodarki odpadami. "
+                 "Domyślnie zaznaczono gospodarkę odpadami i sprzedaż odpadów; "
+                 "pozostałe branże możesz dodać z listy.")
+        st.link_button("Urzędowy wykaz i objaśnienia kodów", PKD_SOURCE_URL)
+    if not selected_pkd:
+        st.caption("Wybierz co najmniej jeden kod, aby pobrać firmy.")
     web = st.checkbox("Szukaj kontaktów w internecie", value=True,
                       help="Sprawdza publiczne wyniki wyszukiwania. Dane z fragmentów stron "
                            "wymagają potwierdzenia i nie zawsze są dostępne.")
-    run = st.button("Pobierz firmy z KRS", type="primary", width="stretch")
-    demo = st.button("Zobacz przykład na fikcyjnych danych", width="stretch")
+    run = st.button("Pobierz firmy z KRS", type="primary", width="stretch", disabled=not selected_pkd)
     st.caption("„Wczoraj” jest wyliczane według czasu w Polsce. "
                "Pobieranie odpisów dużej liczby firm może potrwać kilka minut.")
 
 st.info("Lista dotyczy pierwszej rejestracji w KRS. Późniejsze zmiany wpisów są odrzucane. "
         "Kody PKD i kontakty w KRS są odczytywane z odpisu aktualnego.")
 
-if demo:
-    st.session_state["report"] = demo_report(target)
-if run:
+if run and selected_pkd:
     st.session_state.pop("report", None)
     try:
-        filters = pkd_filters(pkd_text)
+        filters = tuple(selected_pkd)
         bar = st.progress(0.0, "Łączenie z KRS…")
         def update(done, total, message):
             bar.progress(done / total if total else 0.0, message)
-        report = collect(target, filters, main_only, enrich_contacts if web else None, update)
+        report = collect(target, filters, main_only=False,
+                         enrich=enrich_contacts if web else None, progress=update)
         save_report(report, ROOT / "reports")
         st.session_state["report"] = report
         bar.empty()
@@ -54,11 +65,13 @@ if run:
         st.error("Nie udało się zapisać raportu. Sprawdź dostępne miejsce i prawa zapisu w folderze reports.")
 
 report = st.session_state.get("report")
+# Do not keep an old demo report visible in an existing browser session.
+if report and report.demo:
+    st.session_state.pop("report", None)
+    report = None
 if report:
     st.subheader(f"Raport: {report.target_date}")
-    if report.demo:
-        st.warning("DEMO — poniższe firmy i dane kontaktowe są fikcyjne.")
-    elif not report.complete:
+    if not report.complete:
         st.warning(status(report))
     else:
         st.success(status(report))
@@ -67,7 +80,7 @@ if report:
     b.metric("Sprawdzone odpisy", report.checked)
     c.metric("Firmy pasujące do PKD", len(report.companies))
     st.caption(f"PKD: {', '.join(report.filters)} · "
-               f"{'Tylko przeważające' if report.main_only else 'Wszystkie ujawnione kody'} · "
+               f"Działalność przeważająca i dodatkowa · "
                f"Wygenerowano: {report.generated_at}")
     records = rows(report)
     if records:
@@ -75,6 +88,15 @@ if report:
     else:
         st.write("Brak firm spełniających kryteria w sprawdzonych odpisach. "
                  "Przed wyciągnięciem wniosków sprawdź kompletność raportu.")
+    st.write("**Eksport wyników**")
+    left, right = st.columns(2)
+    left.download_button("Eksport do Excela (.xlsx)", xlsx_bytes(report),
+                         file_name=f"firmy-krs-{report.target_date}.xlsx",
+                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         width="stretch")
+    right.download_button("Eksport do PDF", pdf_bytes(report),
+                          file_name=f"firmy-krs-{report.target_date}.pdf",
+                          mime="application/pdf", width="stretch")
     with st.expander("Kontakty i źródła"):
         st.write("Adresy e-mail i WWW z KRS są danymi ujawnionymi w rejestrze. "
                  "Kontakty z internetu pochodzą z fragmentów wyników wyszukiwania. "
@@ -91,15 +113,5 @@ if report:
         with st.expander(f"Błędy do sprawdzenia ({len(report.errors)})", expanded=True):
             for error in report.errors:
                 st.write(error)
-    prefix = "DEMO-" if report.demo else ""
-    left, right = st.columns(2)
-    left.download_button("Pobierz Excel (.xlsx)", xlsx_bytes(report),
-                         file_name=f"{prefix}firmy-krs-{report.target_date}.xlsx",
-                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         width="stretch")
-    right.download_button("Pobierz PDF", pdf_bytes(report),
-                          file_name=f"{prefix}firmy-krs-{report.target_date}.pdf",
-                          mime="application/pdf", width="stretch")
 else:
-    st.write("Wybierz ustawienia po lewej i kliknij **Pobierz firmy z KRS**. "
-             "Możesz też obejrzeć przykład na fikcyjnych danych.")
+    st.write("Wybierz datę i branże po lewej, a następnie kliknij **Pobierz firmy z KRS**.")
